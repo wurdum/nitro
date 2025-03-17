@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/offchainlabs/nitro/execution/nethexec"
 	"io"
 	"math/big"
 	"os"
@@ -524,7 +525,7 @@ func mainImpl() int {
 		}
 	}
 
-	execNode, err := gethexec.CreateExecutionNode(
+	gethNode, err := gethexec.CreateExecutionNode(
 		ctx,
 		stack,
 		chainDb,
@@ -536,6 +537,8 @@ func mainImpl() int {
 		log.Error("failed to create execution node", "err", err)
 		return 1
 	}
+
+	execNode := nethexec.NewNodeWrapper(gethNode)
 
 	currentNode, err := arbnode.CreateNodeFullExecutionClient(
 		ctx,
