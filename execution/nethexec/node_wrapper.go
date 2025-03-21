@@ -2,6 +2,7 @@ package nethexec
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -16,12 +17,44 @@ import (
 
 type NodeWrapper struct {
 	*gethexec.ExecutionNode
+
+	rpcClient     *JSONRPCClient
+	rpcClientLock sync.Mutex
+	rpcURL        string
 }
 
 func NewNodeWrapper(node *gethexec.ExecutionNode) *NodeWrapper {
 	return &NodeWrapper{
 		ExecutionNode: node,
+		rpcURL:        "http://localhost:7547",
 	}
+}
+
+func (w *NodeWrapper) SetRPCURL(url string) {
+	w.rpcClientLock.Lock()
+	defer w.rpcClientLock.Unlock()
+
+	if w.rpcClient != nil {
+		w.rpcClient.Close()
+		w.rpcClient = nil
+	}
+
+	w.rpcURL = url
+}
+
+func (w *NodeWrapper) getRPCClient() (*JSONRPCClient, error) {
+	w.rpcClientLock.Lock()
+	defer w.rpcClientLock.Unlock()
+
+	if w.rpcClient == nil {
+		client, err := NewJSONRPCClient(w.rpcURL)
+		if err != nil {
+			return nil, err
+		}
+		w.rpcClient = client
+	}
+
+	return w.rpcClient, nil
 }
 
 // ---- execution.ExecutionClient interface methods ----
@@ -29,8 +62,17 @@ func NewNodeWrapper(node *gethexec.ExecutionNode) *NodeWrapper {
 func (w *NodeWrapper) DigestMessage(num arbutil.MessageIndex, msg *arbostypes.MessageWithMetadata, msgForPrefetch *arbostypes.MessageWithMetadata) containers.PromiseInterface[*execution.MessageResult] {
 	start := time.Now()
 	log.Info("NodeWrapper: DigestMessage", "num", num)
+
+	//client, err := w.getRPCClient()
+	//if err == nil {
+	//	result := client.DigestMessage(context.Background(), num, msg, msgForPrefetch)
+	//	log.Info("NodeWrapper: DigestMessage via JSON-RPC completed", "num", num, "elapsed", time.Since(start))
+	//	return result
+	//}
+	//
+	//log.Warn("Failed to get RPC client, falling back to direct call", "err", err)
 	result := w.ExecutionNode.DigestMessage(num, msg, msgForPrefetch)
-	log.Info("NodeWrapper: DigestMessage completed", "num", num, "elapsed", time.Since(start))
+	log.Info("NodeWrapper: DigestMessage via direct call completed", "num", num, "elapsed", time.Since(start))
 	return result
 }
 
