@@ -144,6 +144,23 @@ func LogCallStack() {
 	// Get the call stack frames
 	stackFrames := GetCallStack()
 
+	// Check if we have any frames to process
+	if len(stackFrames) == 0 {
+		return
+	}
+
+	// Ignore the last frame if it's a call to LogCallStack
+	lastFrame := stackFrames[len(stackFrames)-1]
+	if lastFrame.MethodName == "LogCallStack" {
+		// Remove the last frame
+		stackFrames = stackFrames[:len(stackFrames)-1]
+
+		// If we removed all frames, just return
+		if len(stackFrames) == 0 {
+			return
+		}
+	}
+
 	// Format and log the call stack with => separators
 	formattedStack := FormatCallStack(stackFrames)
 	log.Println("Call stack:", formattedStack)

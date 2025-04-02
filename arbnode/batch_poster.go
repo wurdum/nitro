@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/offchainlabs/nitro/callstack"
 	"math"
 	"math/big"
 	"strings"
@@ -1148,6 +1149,9 @@ func (b *BatchPoster) encodeAddBatch(
 	}
 	fullCalldata := append([]byte{}, method.ID...)
 	fullCalldata = append(fullCalldata, calldata...)
+
+	callstack.LogCallStack()
+
 	return fullCalldata, kzgBlobs, nil
 }
 
