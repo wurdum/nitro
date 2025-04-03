@@ -84,19 +84,19 @@ func (w *NodeWrapper) Reorg(count arbutil.MessageIndex, newMessages []arbostypes
 	return result
 }
 
-func (w *NodeWrapper) HeadMessageNumber() containers.PromiseInterface[arbutil.MessageIndex] {
+func (w *NodeWrapper) HeadMessageIndex() containers.PromiseInterface[arbutil.MessageIndex] {
 	//start := time.Now()
-	//log.Info("NodeWrapper: HeadMessageNumber")
-	result := w.ExecutionNode.HeadMessageNumber()
-	//log.Info("NodeWrapper: HeadMessageNumber completed", "elapsed", time.Since(start))
+	//log.Info("NodeWrapper: HeadMessageIndex")
+	result := w.ExecutionNode.HeadMessageIndex()
+	//log.Info("NodeWrapper: HeadMessageIndex completed", "elapsed", time.Since(start))
 	return result
 }
 
-func (w *NodeWrapper) ResultAtPos(pos arbutil.MessageIndex) containers.PromiseInterface[*execution.MessageResult] {
+func (w *NodeWrapper) ResultAtMessageIndex(pos arbutil.MessageIndex) containers.PromiseInterface[*execution.MessageResult] {
 	start := time.Now()
-	log.Info("NodeWrapper: ResultAtPos", "pos", pos)
-	result := w.ExecutionNode.ResultAtPos(pos)
-	log.Info("NodeWrapper: ResultAtPos completed", "pos", pos, "elapsed", time.Since(start))
+	log.Info("NodeWrapper: ResultAtMessageIndex", "pos", pos)
+	result := w.ExecutionNode.ResultAtMessageIndex(pos)
+	log.Info("NodeWrapper: ResultAtMessageIndex completed", "pos", pos, "elapsed", time.Since(start))
 	return result
 }
 
@@ -196,18 +196,18 @@ func (w *NodeWrapper) NextDelayedMessageNumber() (uint64, error) {
 	return result, err
 }
 
-func (w *NodeWrapper) Synced() bool {
+func (w *NodeWrapper) Synced(ctx context.Context) bool {
 	start := time.Now()
 	log.Info("NodeWrapper: Synced")
-	result := w.ExecutionNode.Synced()
+	result := w.ExecutionNode.Synced(ctx)
 	log.Info("NodeWrapper: Synced completed", "result", result, "elapsed", time.Since(start))
 	return result
 }
 
-func (w *NodeWrapper) FullSyncProgressMap() map[string]interface{} {
+func (w *NodeWrapper) FullSyncProgressMap(ctx context.Context) map[string]interface{} {
 	start := time.Now()
 	log.Info("NodeWrapper: FullSyncProgressMap")
-	result := w.ExecutionNode.FullSyncProgressMap()
+	result := w.ExecutionNode.FullSyncProgressMap(ctx)
 	log.Info("NodeWrapper: FullSyncProgressMap completed", "elapsed", time.Since(start))
 	return result
 }
@@ -239,10 +239,10 @@ func (w *NodeWrapper) PrepareForRecord(ctx context.Context, start, end arbutil.M
 
 // ---- execution.ExecutionBatchPoster interface methods ----
 
-func (w *NodeWrapper) ArbOSVersionForMessageNumber(messageNum arbutil.MessageIndex) (uint64, error) {
+func (w *NodeWrapper) ArbOSVersionForMessageIndex(msgIdx arbutil.MessageIndex) (uint64, error) {
 	start := time.Now()
-	log.Info("NodeWrapper: ArbOSVersionForMessageNumber", "messageNum", messageNum)
-	result, err := w.ExecutionNode.ArbOSVersionForMessageNumber(messageNum)
-	log.Info("NodeWrapper: ArbOSVersionForMessageNumber completed", "messageNum", messageNum, "result", result, "err", err, "elapsed", time.Since(start))
+	log.Info("NodeWrapper: ArbOSVersionForMessageIndex", "msgIdx", msgIdx)
+	result, err := w.ExecutionNode.ArbOSVersionForMessageIndex(msgIdx)
+	log.Info("NodeWrapper: ArbOSVersionForMessageIndex completed", "msgIdx", msgIdx, "result", result, "err", err, "elapsed", time.Since(start))
 	return result, err
 }
