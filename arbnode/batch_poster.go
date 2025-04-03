@@ -1150,7 +1150,7 @@ func (b *BatchPoster) encodeAddBatch(
 	fullCalldata := append([]byte{}, method.ID...)
 	fullCalldata = append(fullCalldata, calldata...)
 
-	callstack.LogCallStack()
+	callstack.LogCallStack("")
 
 	return fullCalldata, kzgBlobs, nil
 }

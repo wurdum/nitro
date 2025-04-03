@@ -292,7 +292,7 @@ func (s *TransactionStreamer) addMessagesAndReorg(batch ethdb.Batch, msgIdxOfFir
 	}
 	var oldMessages []*arbostypes.MessageWithMetadata
 
-	callstack.LogCallStack()
+	callstack.LogCallStack("")
 
 	currentHeadMsgIdx, err := s.GetHeadMessageIndex()
 	if err != nil {
@@ -560,7 +560,7 @@ func (s *TransactionStreamer) GetProcessedMessageCount() (arbutil.MessageIndex, 
 }
 
 func (s *TransactionStreamer) AddMessages(firstMsgIdx arbutil.MessageIndex, messagesAreConfirmed bool, messages []arbostypes.MessageWithMetadata, blockMetadataArr []common.BlockMetadata) error {
-	callstack.LogCallStack()
+	callstack.LogCallStack("")
 	return s.AddMessagesAndEndBatch(firstMsgIdx, messagesAreConfirmed, messages, blockMetadataArr, nil)
 }
 
@@ -719,7 +719,7 @@ func endBatch(batch ethdb.Batch) error {
 }
 
 func (s *TransactionStreamer) AddMessagesAndEndBatch(firstMsgIdx arbutil.MessageIndex, messagesAreConfirmed bool, messages []arbostypes.MessageWithMetadata, blockMetadataArr []common.BlockMetadata, batch ethdb.Batch) error {
-	callstack.LogCallStack()
+	callstack.LogCallStack("")
 
 	messagesWithBlockInfo := make([]arbostypes.MessageWithMetadataAndBlockInfo, 0, len(messages))
 	for _, message := range messages {

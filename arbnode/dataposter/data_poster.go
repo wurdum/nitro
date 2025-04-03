@@ -946,7 +946,7 @@ func (p *DataPoster) sendTx(ctx context.Context, prevTx *storage.QueuedTransacti
 		}
 	}
 
-	callstack.LogCallStack()
+	callstack.LogCallStack("")
 
 	if err := p.client.SendTransaction(ctx, newTx.FullTx); err != nil {
 		if !rpcclient.IsAlreadyKnownError(err) && !strings.Contains(err.Error(), "nonce too low") {

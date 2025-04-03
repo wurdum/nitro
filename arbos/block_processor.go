@@ -173,7 +173,7 @@ func ProduceBlockAdvanced(
 	isMsgForPrefetch bool,
 	runMode core.MessageRunMode,
 ) (*types.Block, types.Receipts, error) {
-	callstack.LogCallStack()
+	callstack.LogCallStack("")
 
 	arbState, err := arbosState.OpenSystemArbosState(statedb, nil, true)
 	if err != nil {

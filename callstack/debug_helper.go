@@ -28,6 +28,10 @@ type StackTrace struct {
 	TraceID   string       `json:"traceId"`
 }
 
+func IsNitroCall(fileName string) bool {
+	return strings.Contains(fileName, "nitro") && strings.HasSuffix(fileName, ".go")
+}
+
 // GetCallStack returns a structured representation of the call stack
 func GetCallStack() []StackFrame {
 	// Skip this function and the calling function
@@ -92,14 +96,16 @@ func GetCallStack() []StackFrame {
 			fileName = fileName[lastSlash+1:]
 		}
 
-		stackFrame := StackFrame{
-			File:          fileName,
-			LineNumber:    frame.Line,
-			StructureName: structureName,
-			MethodName:    methodName,
-		}
+		if IsNitroCall(frame.File) {
+			stackFrame := StackFrame{
+				File:          fileName,
+				LineNumber:    frame.Line,
+				StructureName: structureName,
+				MethodName:    methodName,
+			}
 
-		stackFrames = append(stackFrames, stackFrame)
+			stackFrames = append(stackFrames, stackFrame)
+		}
 
 		if !more {
 			break
@@ -140,7 +146,7 @@ func FormatCallStack(frames []StackFrame) string {
 }
 
 // LogCallStack logs the call stack and posts it to the API
-func LogCallStack() {
+func LogCallStack(tag string) {
 	// Get the call stack frames
 	stackFrames := GetCallStack()
 
@@ -159,6 +165,12 @@ func LogCallStack() {
 		if len(stackFrames) == 0 {
 			return
 		}
+	}
+
+	if tag != "" && len(stackFrames) > 0 {
+		// Add the tag to the last frame's method name
+		lastFrameIndex := len(stackFrames) - 1
+		stackFrames[lastFrameIndex].MethodName = stackFrames[lastFrameIndex].MethodName + "+" + tag
 	}
 
 	// Format and log the call stack with => separators
