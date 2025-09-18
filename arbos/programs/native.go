@@ -73,7 +73,7 @@ func activateProgram(
 	debug bool,
 	burner burn.Burner,
 	runCtx *core.MessageRunContext,
-) (*activationInfo, error) {
+) (*activationInfo, map[rawdb.WasmTarget][]byte, error) {
 	moduleActivationMandatory := true
 	suppliedGas := burner.GasLeft()
 	gasLeft := suppliedGas
@@ -83,9 +83,9 @@ func activateProgram(
 		burner.Burn(multigas.ResourceKindComputation, suppliedGas-gasLeft) //nolint:errcheck
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return info, db.ActivateWasm(info.moduleHash, asmMap)
+	return info, asmMap, db.ActivateWasm(info.moduleHash, asmMap)
 }
 
 func activateModule(
