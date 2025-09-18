@@ -6,6 +6,7 @@ package burn
 import (
 	"fmt"
 
+	"github.com/ethereum/go-ethereum/core/types"
 	glog "github.com/ethereum/go-ethereum/log"
 
 	"github.com/offchainlabs/nitro/arbos/util"
@@ -36,6 +37,10 @@ func NewSystemBurner(tracingInfo *util.TracingInfo, readOnly bool) *SystemBurner
 }
 
 func (burner *SystemBurner) Burn(amount uint64) error {
+	if types.TraceShowBurn && types.IsTargetBlock() {
+		types.OLog2(fmt.Sprintf("system burn=%d", amount))
+	}
+
 	burner.gasBurnt += amount
 	return nil
 }

@@ -73,13 +73,13 @@ func activateProgram(
 	debug bool,
 	burner burn.Burner,
 	runCtx *core.MessageRunContext,
-) (*activationInfo, error) {
+) (*activationInfo, map[rawdb.WasmTarget][]byte, error) {
 	moduleActivationMandatory := true
 	info, asmMap, err := activateProgramInternal(program, codehash, wasm, page_limit, stylusVersion, arbosVersionForGas, debug, burner.GasLeft(), runCtx.WasmTargets(), moduleActivationMandatory)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return info, db.ActivateWasm(info.moduleHash, asmMap)
+	return info, asmMap, db.ActivateWasm(info.moduleHash, asmMap)
 }
 
 func activateModule(

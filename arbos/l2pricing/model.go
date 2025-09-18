@@ -4,8 +4,10 @@
 package l2pricing
 
 import (
+	"fmt"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
 
 	"github.com/offchainlabs/nitro/util/arbmath"
@@ -26,12 +28,18 @@ func (ps *L2PricingState) AddToGasPool(gas int64) error {
 		return err
 	}
 	// pay off some of the backlog with the added gas, stopping at 0
+	var newBacklog uint64
 	if gas > 0 {
-		backlog = arbmath.SaturatingUSub(backlog, uint64(gas))
+		newBacklog = arbmath.SaturatingUSub(backlog, uint64(gas))
 	} else {
-		backlog = arbmath.SaturatingUAdd(backlog, uint64(-gas))
+		newBacklog = arbmath.SaturatingUAdd(backlog, uint64(-gas))
 	}
-	return ps.SetGasBacklog(backlog)
+
+	if types.IsTargetBlock() {
+		types.OLog2(fmt.Sprintf("gas=%d backlog=%d newBacklog=%d", gas, backlog, newBacklog))
+	}
+
+	return ps.SetGasBacklog(newBacklog)
 }
 
 // UpdatePricingModel updates the pricing model with info from the last block

@@ -4,6 +4,7 @@
 package precompiles
 
 import (
+	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -35,6 +36,10 @@ type Context struct {
 }
 
 func (c *Context) Burn(amount uint64) error {
+	if types.TraceShowBurn && types.IsTargetBlock() {
+		types.OLog2(fmt.Sprintf("context burn=%d", amount))
+	}
+
 	if c.gasLeft < amount {
 		return c.BurnOut()
 	}

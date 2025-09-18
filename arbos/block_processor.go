@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/arbitrum_types"
 	"github.com/ethereum/go-ethereum/common"
@@ -244,12 +245,19 @@ func ProduceBlockAdvanced(
 	redeems := types.Transactions{}
 	userTxsProcessed := 0
 
+	types.SetCurrentBlockNumber(lastBlockHeader.Number.Int64() + 1)
+	var txIndex int64
+	txIndex = -1
+
 	// We'll check that the block can fit each message, so this pool is set to not run out
 	gethGas := core.GasPool(l2pricing.GethBlockGasLimit)
 
 	firstTx := types.NewTx(startTx)
 
 	for {
+		txIndex++
+		types.SetTransactionIndex(txIndex)
+
 		// repeatedly process the next tx, doing redeems created along the way in FIFO order
 
 		var tx *types.Transaction
@@ -269,6 +277,7 @@ func ProduceBlockAdvanced(
 			}
 			retryable, _ := arbState.RetryableState().OpenRetryable(retry.TicketId, time)
 			if retryable == nil {
+				types.SetTransactionIndex(txIndex - 1) // Have block finalization attached to last tx
 				// retryable was already deleted
 				continue
 			}
@@ -278,6 +287,7 @@ func ProduceBlockAdvanced(
 				return nil, nil, fmt.Errorf("error fetching next transaction to sequence, userTxsProcessed: %d, hookTxErrors: %d, err: %w", userTxsProcessed, len(sequencingHooks.TxErrors), err)
 			}
 			if tx == nil {
+				types.SetTransactionIndex(txIndex - 1) // Have block finalization attached to last tx
 				break
 			}
 			if tx.Type() != types.ArbitrumInternalTxType {
@@ -289,6 +299,8 @@ func ProduceBlockAdvanced(
 				}
 			}
 		}
+
+		types.OLog2(fmt.Sprintf("transaction type=%d", tx.Type()))
 
 		startRefund := statedb.GetRefund()
 		if startRefund != 0 {
@@ -374,6 +386,9 @@ func ProduceBlockAdvanced(
 				},
 			)
 			if err != nil {
+				if types.IsTargetBlock() {
+					types.OLog2(fmt.Sprintf("transaction revert err=%s snap=%d", err, snap))
+				}
 				// Ignore this transaction if it's invalid under the state transition function
 				statedb.RevertToSnapshot(snap)
 				statedb.ClearTxFilter()
@@ -382,6 +397,9 @@ func ProduceBlockAdvanced(
 
 			// Additional post-transaction validity check
 			if err = extraPostTxFilter(chainConfig, header, statedb, arbState, tx, options, sender, l1Info, result); err != nil {
+				if types.IsTargetBlock() {
+					types.OLog2(fmt.Sprintf("transaction revert post-filter err=%s snap=%d", err, snap))
+				}
 				statedb.RevertToSnapshot(snap)
 				statedb.ClearTxFilter()
 				return nil, nil, err
@@ -389,6 +407,19 @@ func ProduceBlockAdvanced(
 
 			return receipt, result, nil
 		})()
+
+		if types.IsTargetBlock() {
+			resultErr := ""
+			if result != nil && result.Err != nil {
+				resultErr = result.Err.Error()
+			}
+
+			scheduledTxesLen := 0
+			if result != nil && result.ScheduledTxes != nil {
+				scheduledTxesLen = result.ScheduledTxes.Len()
+			}
+			types.OLog2(fmt.Sprintf("transaction finalized resultScheduledTxesLen=%d resultErr=%s err=%s", scheduledTxesLen, resultErr, err))
+		}
 
 		// append the err, even if it is nil
 		hooks.TxErrors = append(hooks.TxErrors, err)
@@ -408,6 +439,11 @@ func ProduceBlockAdvanced(
 					userTxsProcessed++
 				}
 			}
+
+			if types.IsTargetBlock() {
+				types.OLog2(fmt.Sprintf("transaction finalized hooks.DiscardInvalidTxsEarly=%t blockGasLeft=%d userTxsProcessed=%d", hooks.DiscardInvalidTxsEarly, blockGasLeft, userTxsProcessed))
+			}
+
 			continue
 		}
 
@@ -500,8 +536,27 @@ func ProduceBlockAdvanced(
 		complete = append(complete, tx)
 		receipts = append(receipts, receipt)
 
+		// Output receipt information
+		var logStrings []string
+		for _, log := range receipt.Logs {
+			logData := ""
+			if len(log.Data) > 0 {
+				logData = fmt.Sprintf("%x", log.Data)
+			}
+			logStrings = append(logStrings, fmt.Sprintf("a=%s, d=%s", strings.ToLower(log.Address.Hex()), logData))
+		}
+
+		if types.IsTargetBlock() {
+			types.OLog2(fmt.Sprintf("receipt gas=%d status=? logs=%s", receipt.GasUsed, strings.Join(logStrings, ";")))
+		}
+
 		if isUserTx {
 			userTxsProcessed++
+		}
+
+		if types.IsTargetBlock() && types.TraceShowStateRootChange {
+			stateRoot := statedb.IntermediateRoot(false)
+			types.OLog2(fmt.Sprintf("transaction newStateRoot=%s", strings.ToLower(stateRoot.String())))
 		}
 	}
 
@@ -545,6 +600,8 @@ func ProduceBlockAdvanced(
 		// This is a real chain and funds were burnt, not minted, so only log an error and don't panic
 		log.Error("Unexpected total balance delta", "delta", balanceDelta, "expected", expectedBalanceDelta)
 	}
+
+	types.Log3(block)
 
 	return block, receipts, nil
 }
