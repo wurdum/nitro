@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/holiman/uint256"
 
 	"github.com/ethereum/go-ethereum/arbitrum/multigas"
@@ -119,7 +121,7 @@ func (p *TxProcessor) ExecuteWASM(scope *vm.ScopeContext, input []byte, evm *vm.
 	// reentrant if more than one open same-actor context span exists
 	reentrant := p.Programs[acting] > 1
 
-	return p.state.Programs().CallProgram(
+	program, err := p.state.Programs().CallProgram(
 		scope,
 		p.evm.StateDB,
 		evm,
@@ -128,6 +130,17 @@ func (p *TxProcessor) ExecuteWASM(scope *vm.ScopeContext, input []byte, evm *vm.
 		reentrant,
 		p.RunContext(),
 	)
+
+	if types.IsTargetBlock() {
+		programHash := ""
+		if err == nil {
+			programHash = crypto.Keccak256Hash(program).String()
+		}
+
+		types.OLog2(fmt.Sprintf("stylus executeWasm reentrant=%t gas=%d refund=%d programHash=%s err=%v", reentrant, contract.Gas, p.evm.StateDB.GetRefund(), programHash, err))
+	}
+
+	return program, err
 }
 
 //nolint:staticcheck
@@ -269,6 +282,13 @@ func (p *TxProcessor) StartTxHook() (endTxNow bool, multiGasUsed multigas.MultiG
 		time := evm.Context.Time
 		timeout := time + retryables.RetryableLifetimeSeconds
 
+		retryToStr := ""
+		if tx.RetryTo != nil {
+			retryToStr = strings.ToLower(tx.RetryTo.String())
+		}
+		if types.IsTargetBlock() {
+			types.OLog2(fmt.Sprintf("retryable tx retryTo=%s", retryToStr))
+		}
 		// we charge for creating the retryable and reaping the next expired one on L1
 		retryable, err := p.state.RetryableState().CreateRetryable(
 			ticketId,
@@ -356,6 +376,22 @@ func (p *TxProcessor) StartTxHook() (endTxNow bool, multiGasUsed multigas.MultiG
 			submissionFee,
 		)
 		p.state.Restrict(err)
+
+		if types.IsTargetBlock() {
+			types.OLog2(fmt.Sprintf("transaction retry inner chainId=%s nonce=%d from=%s gasFeeCap=%s gas=%d to=%s value=%s data=%s ticketId=%s refundTo=%s maxRefund=%s submissionFeeRefund=%s",
+				retryTxInner.ChainId.String(),
+				retryTxInner.Nonce,
+				strings.ToLower(retryTxInner.From.String()),
+				retryTxInner.GasFeeCap.String(),
+				retryTxInner.Gas,
+				strings.ToLower(retryTxInner.To.String()),
+				retryTxInner.Value.String(),
+				common.Bytes2Hex(retryTxInner.Data),
+				retryTxInner.TicketId.String(),
+				strings.ToLower(retryTxInner.RefundTo.String()),
+				retryTxInner.MaxRefund.String(),
+				retryTxInner.SubmissionFeeRefund.String()))
+		}
 
 		_, err = retryable.IncrementNumTries()
 		p.state.Restrict(err)
@@ -456,6 +492,9 @@ func (p *TxProcessor) GasChargingHook(gasRemaining *uint64, intrinsicGas uint64)
 	if p.msg.TxRunContext.IsExecutedOnChain() {
 		p.msg.SkipL1Charging = false
 	}
+	if types.IsTargetBlock() {
+		types.OLog2(fmt.Sprintf("poster=%s baseFee=%s skipL1Charging=%t", strings.ToLower(poster.String()), basefee.String(), p.msg.SkipL1Charging))
+	}
 	if basefee.Sign() > 0 && !p.msg.SkipL1Charging {
 		// Since tips go to the network, and not to the poster, we use the basefee.
 		// Note, this only determines the amount of gas bought, not the price per gas.
@@ -471,6 +510,14 @@ func (p *TxProcessor) GasChargingHook(gasRemaining *uint64, intrinsicGas uint64)
 		p.posterGas = GetPosterGas(p.state, basefee, p.msg.TxRunContext, posterCost)
 		p.PosterFee = arbmath.BigMulByUint(basefee, p.posterGas) // round down
 		gasNeededToStartEVM = p.posterGas
+		if types.IsTargetBlock() {
+			types.OLog2(fmt.Sprintf("posterCost=%s calldataUnits=%d posterGas=%d posterFee=%s",
+				posterCost.String(), calldataUnits, p.posterGas, p.PosterFee))
+		}
+	}
+
+	if types.IsTargetBlock() {
+		types.OLog2(fmt.Sprintf("gl=%d gn=%d", *gasRemaining, gasNeededToStartEVM))
 	}
 
 	if *gasRemaining < gasNeededToStartEVM {
@@ -502,6 +549,10 @@ func (p *TxProcessor) GasChargingHook(gasRemaining *uint64, intrinsicGas uint64)
 			p.computeHoldGas = *gasRemaining - max
 			*gasRemaining = max
 		}
+	}
+
+	if types.IsTargetBlock() {
+		types.OLog2(fmt.Sprintf("gas charging hook gasLeft=%d computeHoldGas=%d", *gasRemaining, p.computeHoldGas))
 	}
 
 	return tipReceipient, multiGas, nil
@@ -653,6 +704,10 @@ func (p *TxProcessor) EndTxHook(gasLeft uint64, success bool) {
 		computeCost = totalCost
 	}
 
+	if types.IsTargetBlock() {
+		types.OLog2(fmt.Sprintf("tx end-hook baseFee=%s totalCost=%s computeCost=%s", basefee.String(), totalCost.String(), computeCost.String()))
+	}
+
 	if p.state.ArbOSVersion() > params.ArbosVersion_4 {
 		infraFeeAccount, err := p.state.InfraFeeAccount()
 		p.state.Restrict(err)
@@ -695,6 +750,11 @@ func (p *TxProcessor) EndTxHook(gasLeft uint64, success bool) {
 			log.Error("total gas used < poster gas component", "gasUsed", gasUsed, "posterGas", p.posterGas)
 			computeGas = gasUsed
 		}
+
+		if types.IsTargetBlock() {
+			types.OLog2(fmt.Sprintf("tx end-hook gasUsed=%d computeGas=%d posterGas=%d", gasUsed, computeGas, p.posterGas))
+		}
+
 		p.state.Restrict(p.state.L2PricingState().AddToGasPool(-arbmath.SaturatingCast[int64](computeGas), p.state.ArbOSVersion()))
 	}
 }
@@ -730,6 +790,11 @@ func (p *TxProcessor) ScheduledTxes() types.Transactions {
 			event.MaxRefund,
 			event.SubmissionFeeRefund,
 		)
+
+		if types.IsTargetBlock() {
+			types.OLog2(fmt.Sprintf("transaction retry chainId=%s nonce=%d from=%s gasFeeCap=%s gas=%d to=%s value=%s data=%s ticketId=%s refundTo=%s maxRefund=%s submissionFeeRefund=%s", redeem.ChainId.String(), redeem.Nonce, strings.ToLower(redeem.From.String()), redeem.GasFeeCap.String(), redeem.Gas, strings.ToLower(redeem.To.String()), redeem.Value.String(), common.Bytes2Hex(redeem.Data), redeem.TicketId.String(), strings.ToLower(redeem.RefundTo.String()), redeem.MaxRefund.String(), redeem.SubmissionFeeRefund.String()))
+		}
+
 		scheduled = append(scheduled, types.NewTx(redeem))
 	}
 	return scheduled
@@ -754,6 +819,11 @@ func (p *TxProcessor) L1BlockNumber(blockCtx vm.BlockContext) (uint64, error) {
 
 func (p *TxProcessor) L1BlockHash(blockCtx vm.BlockContext, l1BlockNumber uint64) (common.Hash, error) {
 	hash, cached := p.cachedL1BlockHashes[l1BlockNumber]
+
+	if types.IsTargetBlock() {
+		types.OLog2(fmt.Sprintf("L1BlockHash1: %s", hash.String()))
+	}
+
 	if cached {
 		return hash, nil
 	}
@@ -767,6 +837,11 @@ func (p *TxProcessor) L1BlockHash(blockCtx vm.BlockContext, l1BlockNumber uint64
 		return common.Hash{}, err
 	}
 	p.cachedL1BlockHashes[l1BlockNumber] = hash
+
+	if types.IsTargetBlock() {
+		types.OLog2(fmt.Sprintf("L1BlockHash2: %s", hash.String()))
+	}
+
 	return hash, nil
 }
 

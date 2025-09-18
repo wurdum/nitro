@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/tracing"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
@@ -296,6 +297,8 @@ var ErrFatalNodeOutOfDate = errors.New("please upgrade to the latest version of 
 func (state *ArbosState) UpgradeArbosVersion(
 	upgradeTo uint64, firstTime bool, stateDB vm.StateDB, chainConfig *params.ChainConfig,
 ) error {
+	types.OLogAlways(fmt.Sprintf("arbos upgrade target=%d current=%d", upgradeTo, state.arbosVersion))
+
 	for state.arbosVersion < upgradeTo {
 		ensure := func(err error) {
 			if err != nil {

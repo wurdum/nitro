@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
 
 	"github.com/offchainlabs/nitro/util/arbmath"
@@ -48,10 +49,16 @@ func (ps *L2PricingState) AddToGasPool(gas int64, arbosVersion uint64) error {
 
 func (ps *L2PricingState) addToGasPoolLegacy(gas int64) error {
 	backlog, err := ps.GasBacklog()
+	oldBacklog := backlog
 	if err != nil {
 		return err
 	}
 	backlog = applyGasDelta(backlog, gas)
+
+	if types.IsTargetBlock() {
+		types.OLog2(fmt.Sprintf("l2 pricing legacy gas=%d backlog=%d newBacklog=%d", gas, oldBacklog, backlog))
+	}
+
 	return ps.SetGasBacklog(backlog)
 }
 
@@ -66,7 +73,13 @@ func (ps *L2PricingState) addToGasPoolMultiConstraints(gas int64) error {
 		if err != nil {
 			return fmt.Errorf("failed to get backlog of constraint %v: %w", i, err)
 		}
-		err = constraint.backlog.Set(applyGasDelta(backlog, gas))
+		newBacklog := applyGasDelta(backlog, gas)
+		err = constraint.backlog.Set(newBacklog)
+
+		if types.IsTargetBlock() {
+			types.OLog2(fmt.Sprintf("l2 pricing new gas=%d backlog=%d newBacklog=%d", gas, backlog, newBacklog))
+		}
+
 		if err != nil {
 			return fmt.Errorf("failed to set backlog of constraint %v: %w", i, err)
 		}

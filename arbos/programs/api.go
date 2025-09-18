@@ -4,7 +4,9 @@
 package programs
 
 import (
+	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/holiman/uint256"
 
@@ -77,6 +79,11 @@ func newApiClosures(
 		isOutOfGas := false
 		recording := db.Recording()
 		multiGas := multigas.ZeroGas()
+
+		if types.IsTargetBlock() {
+			types.OLog2(fmt.Sprintf("stylus api setTrieSlots gasLeft=%d", *gasLeft))
+		}
+
 		for len(data) > 0 {
 			key := common.BytesToHash(data[:32])
 			value := common.BytesToHash(data[32:64])
@@ -97,6 +104,11 @@ func newApiClosures(
 				break
 			}
 			*gasLeft -= cost
+
+			if types.IsTargetBlock() {
+				types.OLog2(fmt.Sprintf("stylus api setTrieSlots gasLeft=%d gasCost=%d", *gasLeft, cost))
+			}
+
 			multiGas.SaturatingAddInto(costMultiGas)
 			db.SetState(actingAddress, key, value)
 		}
@@ -133,6 +145,10 @@ func newApiClosures(
 		//     - instructions.go   opCall()  opDelegateCall()  opStaticCall()
 		//
 
+		if types.IsTargetBlock() {
+			types.OLog2(fmt.Sprintf("stylus api call gasLeft=%d gasRequested=%d value=%s data=%s", gasLeft, gasReq, value.String(), common.Bytes2Hex(input)))
+		}
+
 		// read-only calls are not payable (opCall)
 		if readOnly && value.Sign() != 0 {
 			return nil, 0, vm.ErrWriteProtection
@@ -141,6 +157,10 @@ func newApiClosures(
 		// computes makeCallVariantGasCallEIP2929 and gasCall/gasDelegateCall/gasStaticCall
 		mgCost, err := vm.WasmCallCost(db, contract, value, gasLeft)
 		if err != nil {
+			if types.IsTargetBlock() {
+				types.OLog2(fmt.Sprintf("stylus api callCost gasLeft=%d mgCost=%d", gasLeft, mgCost.SingleGas()))
+			}
+
 			return nil, gasLeft, err
 		}
 		baseCost := mgCost.SingleGas()
@@ -152,6 +172,10 @@ func newApiClosures(
 		// EVM rule: calls that pay get a stipend (opCall)
 		if value.Sign() != 0 {
 			gas = arbmath.SaturatingUAdd(gas, params.CallStipend)
+		}
+
+		if types.IsTargetBlock() {
+			types.OLog2(fmt.Sprintf("stylus api call baseCost=%d startGas=%d gas=%d", baseCost, startGas, gas))
 		}
 
 		// Tracing: emit the call (value transfer is done later in evm.Call)
@@ -174,6 +198,10 @@ func newApiClosures(
 			ret, returnGas, returnMultiGas, err = evm.StaticCall(scope.Contract.Address(), contract, input, gas)
 		default:
 			panic("unsupported call type: " + opcode.String())
+		}
+
+		if types.IsTargetBlock() {
+			types.OLog2(fmt.Sprintf("stylus api call returnGas=%d", returnGas))
 		}
 
 		evm.SetReturnData(ret)
@@ -297,7 +325,13 @@ func newApiClosures(
 	addPages := func(pages uint16) uint64 {
 		open, ever := db.AddStylusPages(pages)
 		// addPages WASM computation cost is charged separately in attributeWasmComputation
-		return memoryModel.GasCost(pages, open, ever)
+		cost := memoryModel.GasCost(pages, open, ever)
+
+		if types.IsTargetBlock() {
+			types.OLog2(fmt.Sprintf("stylus api addPages requested=%d openedNow=%d openedEver=%d gasCost=%d", pages, open, ever, cost))
+		}
+
+		return cost
 	}
 	captureHostio := func(name string, args, outs []byte, startInk, endInk uint64) {
 		if tracingInfo.Tracer != nil && tracingInfo.Tracer.CaptureStylusHostio != nil {
@@ -306,7 +340,7 @@ func newApiClosures(
 		tracingInfo.CaptureEVMTraceForHostio(name, args, outs, startInk, endInk)
 	}
 
-	return func(req RequestType, input []byte) ([]byte, []byte, uint64) {
+	wrapResponse := func(req RequestType, input []byte) ([]byte, []byte, uint64) {
 		original := input
 
 		crash := func(reason string) {
@@ -353,6 +387,10 @@ func newApiClosures(
 			return data
 		}
 
+		if types.IsTargetBlock() {
+			types.OLog2(fmt.Sprintf("stylus api request=%d input=%s actingAddress=%s", req, common.Bytes2Hex(input), strings.ToLower(contract.Address().String())))
+		}
+
 		switch req {
 		case GetBytes32:
 			key := takeHash()
@@ -395,6 +433,11 @@ func newApiClosures(
 			if err != nil {
 				statusByte = 2 // TODO: err value
 			}
+
+			if types.IsTargetBlock() {
+				types.OLog2(fmt.Sprintf("stylus api call result status=%d gas=%d data=%s err=%s", statusByte, cost, common.Bytes2Hex(ret), err))
+			}
+
 			return []byte{statusByte}, ret, cost
 		case Create1, Create2:
 			gas := takeU64()
@@ -442,7 +485,7 @@ func newApiClosures(
 			cost := addPages(pages)
 			return []byte{}, nil, cost
 		case CaptureHostIO:
-			if tracingInfo == nil {
+			if tracingInfo == nil && !types.IsTargetBlock() {
 				takeRest() // drop any input
 				return []byte{}, nil, 0
 			}
@@ -455,10 +498,32 @@ func newApiClosures(
 			args := takeFixed(int(argsLen))
 			outs := takeFixed(int(outsLen))
 
-			captureHostio(name, args, outs, startInk, endInk)
+			if tracingInfo != nil {
+				captureHostio(name, args, outs, startInk, endInk)
+			}
+
+			if types.IsTargetBlock() {
+				types.OLog2(fmt.Sprintf("stylus api hostIO name=%s startInk=%d endInk=%d args=%s outs=%s", name, startInk, endInk, common.Bytes2Hex(args), common.Bytes2Hex(outs)))
+			}
+
 			return []byte{}, nil, 0
 		default:
 			panic("unsupported call type: " + strconv.Itoa(int(req)))
 		}
+	}
+
+	return func(req RequestType, input []byte) ([]byte, []byte, uint64) {
+		result, rawData, cost := wrapResponse(req, input)
+
+		if types.IsTargetBlock() {
+			rawDataStr := ""
+			if rawData != nil {
+				rawDataStr = common.Bytes2Hex(rawData)
+			}
+
+			types.OLog2(fmt.Sprintf("stylus api request=%d gasCost=%d result=%s data=%s", req, cost, common.Bytes2Hex(result), rawDataStr))
+		}
+
+		return result, rawData, cost
 	}
 }
