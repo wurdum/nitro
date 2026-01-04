@@ -9,6 +9,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/arbitrum/multigas"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 
@@ -110,6 +111,15 @@ func (p Programs) Params() (*StylusParams, error) {
 	} else {
 		stylusParams.MaxWasmSize = initialMaxWasmSize
 	}
+
+	if types.IsTargetBlock() {
+		types.OLog2(fmt.Sprintf("stylus params arbosVersion=%d stylusVersion=%d inkPrice=%d pageGas=%d pageRamp=%d pageLimit=%d minInitGas=%d minCachedInitGas=%d initCostScalar=%d cachedCostScalar=%d expiryDays=%d keepaliveDays=%d blockCacheSize=%d maxWasmSize=%d",
+			p.ArbosVersion, stylusParams.Version, stylusParams.InkPrice, stylusParams.PageGas, stylusParams.PageRamp,
+			stylusParams.PageLimit, stylusParams.MinInitGas, stylusParams.MinCachedInitGas, stylusParams.InitCostScalar,
+			stylusParams.CachedCostScalar, stylusParams.ExpiryDays, stylusParams.KeepaliveDays, stylusParams.BlockCacheSize,
+			stylusParams.MaxWasmSize))
+	}
+
 	return stylusParams, nil
 }
 
