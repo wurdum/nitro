@@ -112,6 +112,11 @@ func newApiClosures(
 			multiGas.SaturatingAddInto(costMultiGas)
 			db.SetState(actingAddress, key, value)
 		}
+
+		if types.IsTargetBlock() {
+			types.OLog2(fmt.Sprintf("stylus api setTrieSlots isOutOfGas=%t arbosVersion=%d gasLeft=%d", isOutOfGas, evm.Context.ArbOSVersion, *gasLeft))
+		}
+
 		if isOutOfGas {
 			if evm.Context.ArbOSVersion < 50 {
 				return Failure
