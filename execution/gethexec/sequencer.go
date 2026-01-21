@@ -835,6 +835,12 @@ func (s *Sequencer) Pause() {
 
 var ErrNoSequencer = errors.New("sequencer temporarily not available")
 
+func (s *Sequencer) GetPauseAndForwarder() (bool, *TxForwarder) {
+	s.forwarderMutex.Lock()
+	defer s.forwarderMutex.Unlock()
+	return s.isActive, s.forwarder
+}
+
 func (s *Sequencer) getForwarder() *TxForwarder {
 	s.forwarderMutex.Lock()
 	defer s.forwarderMutex.Unlock()
