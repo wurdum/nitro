@@ -46,6 +46,7 @@ import (
 	"github.com/offchainlabs/nitro/cmd/pruning"
 	"github.com/offchainlabs/nitro/cmd/staterecovery"
 	"github.com/offchainlabs/nitro/execution/gethexec"
+	"github.com/offchainlabs/nitro/execution/nethexec"
 	"github.com/offchainlabs/nitro/solgen/go/rollupgen"
 	"github.com/offchainlabs/nitro/staker/bold"
 	"github.com/offchainlabs/nitro/statetransfer"
@@ -606,7 +607,7 @@ func rebuildLocalWasm(ctx context.Context, config *gethexec.Config, l2BlockChain
 	return chainDb, l2BlockChain, nil
 }
 
-func openInitializeChainDb(ctx context.Context, stack *node.Node, config *NodeConfig, chainId *big.Int, cacheConfig *core.BlockChainConfig, targetConfig *gethexec.StylusTargetConfig, tracer *tracing.Hooks, persistentConfig *conf.PersistentConfig, l1Client *ethclient.Client, rollupAddrs chaininfo.RollupAddresses) (ethdb.Database, *core.BlockChain, error) {
+func openInitializeChainDb(ctx context.Context, stack *node.Node, config *NodeConfig, chainId *big.Int, cacheConfig *core.BlockChainConfig, targetConfig *gethexec.StylusTargetConfig, tracer *tracing.Hooks, persistentConfig *conf.PersistentConfig, l1Client *ethclient.Client, initDigester nethexec.InitMessageDigester, rollupAddrs chaininfo.RollupAddresses) (ethdb.Database, *core.BlockChain, error) {
 	if !config.Init.Force {
 		if readOnlyDb, err := stack.OpenDatabaseWithOptions("l2chaindata", node.DatabaseOptions{AncientsDirectory: config.Persistent.Ancient, MetricsNamespace: "l2chaindata/", ReadOnly: true, PebbleExtraOptions: persistentConfig.Pebble.ExtraOptions("l2chaindata")}); err == nil {
 			if chainConfig := gethexec.TryReadStoredChainConfig(readOnlyDb); chainConfig != nil {
@@ -904,6 +905,11 @@ func openInitializeChainDb(ctx context.Context, stack *node.Node, config *NodeCo
 		if !emptyBlockChain && (cacheConfig.StateScheme == rawdb.PathScheme) && config.Init.Force {
 			return chainDb, nil, errors.New("It is not possible to force init with non-empty blockchain when using path scheme")
 		}
+
+		// Trigger genesis block building at Nethermind (external execution) if configured
+		genesisResult := initDigester.DigestInitMessage(ctx, parsedInitMessage.InitialL1BaseFee, parsedInitMessage.SerializedChainConfig)
+		log.Info("DigestInitMessage completed", "blockHash", genesisResult.BlockHash, "sendRoot", genesisResult.SendRoot)
+
 		l2BlockChain, err = gethexec.WriteOrTestBlockChain(chainDb, cacheConfig, initDataReader, chainConfig, genesisArbOSInit, tracer, parsedInitMessage, &config.Execution.TxIndexer, config.Init.AccountsPerSync)
 		if err != nil {
 			return chainDb, nil, err

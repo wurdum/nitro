@@ -38,7 +38,6 @@ import (
 	"github.com/offchainlabs/nitro/daprovider/daclient"
 	"github.com/offchainlabs/nitro/daprovider/data_streaming"
 	"github.com/offchainlabs/nitro/execution"
-	"github.com/offchainlabs/nitro/execution/gethexec"
 	"github.com/offchainlabs/nitro/solgen/go/bridgegen"
 	"github.com/offchainlabs/nitro/solgen/go/precompilesgen"
 	"github.com/offchainlabs/nitro/staker"
@@ -1394,10 +1393,17 @@ func CreateNodeFullExecutionClient(
 	return currentNode, nil
 }
 
+// ExecutionNodeBridge allows different execution client implementations
+// to integrate with the consensus node startup.
+type ExecutionNodeBridge interface {
+	Initialize(ctx context.Context) error
+	SetConsensusClient(consensus execution.FullConsensusClient)
+}
+
 func (n *Node) Start(ctx context.Context) error {
-	execClient, ok := n.ExecutionClient.(*gethexec.ExecutionNode)
+	execClient, ok := n.ExecutionClient.(ExecutionNodeBridge)
 	if !ok {
-		execClient = nil
+		return fmt.Errorf("execution client does not implement ExecutionNodeBridge")
 	}
 	if execClient != nil {
 		err := execClient.Initialize(ctx)

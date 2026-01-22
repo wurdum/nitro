@@ -56,7 +56,9 @@ import (
 	"github.com/offchainlabs/nitro/cmd/util/confighelpers"
 	"github.com/offchainlabs/nitro/daprovider"
 	"github.com/offchainlabs/nitro/daprovider/anytrust"
+	"github.com/offchainlabs/nitro/execution"
 	"github.com/offchainlabs/nitro/execution/gethexec"
+	"github.com/offchainlabs/nitro/execution/nethexec"
 	_ "github.com/offchainlabs/nitro/execution/nodeInterface"
 	"github.com/offchainlabs/nitro/solgen/go/bridgegen"
 	"github.com/offchainlabs/nitro/solgen/go/precompilesgen"
@@ -442,7 +444,28 @@ func mainImpl() int {
 		return 1
 	}
 
-	chainDb, l2BlockChain, err := openInitializeChainDb(ctx, stack, nodeConfig, new(big.Int).SetUint64(nodeConfig.Chain.ID), gethexec.DefaultCacheConfigFor(&nodeConfig.Execution.Caching), &nodeConfig.Execution.StylusTarget, tracer, &nodeConfig.Persistent, l1Client, rollupAddrs)
+	// Create initDigester for external execution mode
+	execMode := nethexec.GetExecutionMode(nodeConfig.Execution.ExecutionMode)
+	var initDigester nethexec.InitMessageDigester
+	var nethRpcClient *nethexec.NethRpcClient
+
+	switch execMode {
+	case nethexec.ModeInternalOnly:
+		initDigester = nethexec.NewFakeRemoteExecutionRpcClient()
+	case nethexec.ModeExternalOnly:
+		nethRpcClient, err = nethexec.NewNethRpcClient(
+			nodeConfig.Execution.NethermindUrl,
+			nodeConfig.Execution.NethermindWsUrl,
+		)
+		if err != nil {
+			log.Crit("failed to create Nethermind RPC client", "err", err)
+			return 1
+		}
+		deferFuncs = append(deferFuncs, func() { nethRpcClient.Close() })
+		initDigester = nethRpcClient
+	}
+
+	chainDb, l2BlockChain, err := openInitializeChainDb(ctx, stack, nodeConfig, new(big.Int).SetUint64(nodeConfig.Chain.ID), gethexec.DefaultCacheConfigFor(&nodeConfig.Execution.Caching), &nodeConfig.Execution.StylusTarget, tracer, &nodeConfig.Persistent, l1Client, initDigester, rollupAddrs)
 	if l2BlockChain != nil {
 		deferFuncs = append(deferFuncs, func() { l2BlockChain.Stop() })
 	}
@@ -522,20 +545,8 @@ func mainImpl() int {
 		}
 	}
 
-	execNode, err := gethexec.CreateExecutionNode(
-		ctx,
-		stack,
-		chainDb,
-		l2BlockChain,
-		l1Client,
-		&ExecutionNodeConfigFetcher{liveNodeConfig},
-		new(big.Int).SetUint64(nodeConfig.ParentChain.ID),
-		liveNodeConfig.Get().Node.TransactionStreamer.SyncTillBlock,
-	)
-	if err != nil {
-		log.Error("failed to create execution node", "err", err)
-		return 1
-	}
+	var currentNode *arbnode.Node
+	var execNode *gethexec.ExecutionNode
 	var wasmModuleRoot common.Hash
 	if liveNodeConfig.Get().Node.ValidatorRequired() {
 		locator, err := server_common.NewMachineLocator(liveNodeConfig.Get().Validation.Wasm.RootPath)
@@ -545,13 +556,102 @@ func mainImpl() int {
 		wasmModuleRoot = locator.LatestWasmModuleRoot()
 	}
 
-	currentNode, err := arbnode.CreateNodeFullExecutionClient(
+	// Create execution client - either internal (Geth) or external (Nethermind)
+	var execClient execution.ExecutionClient
+	var execSequencer execution.ExecutionSequencer
+	var execRecorder execution.ExecutionRecorder
+	var arbOSVersionGetter execution.ArbOSVersionGetter
+
+	if execMode == nethexec.ModeExternalOnly {
+		// For external mode: Create internal Sequencer, but use Nethermind for execution
+		// First create ExecutionEngine (needed by Sequencer for transaction processing)
+		execEngine, err := gethexec.NewExecutionEngine(
+			l2BlockChain,
+			liveNodeConfig.Get().Node.TransactionStreamer.SyncTillBlock,
+			nodeConfig.Execution.ExposeMultiGas,
+		)
+		if err != nil {
+			log.Error("failed to create execution engine for external mode", "err", err)
+			return 1
+		}
+
+		// Create HeaderReader if l1Client is available (needed for gas price estimation)
+		var parentChainReader *headerreader.HeaderReader
+		if l1Client != nil && !reflect.ValueOf(l1Client).IsNil() {
+			arbSys, _ := precompilesgen.NewArbSys(types.ArbSysAddress, l1Client)
+			parentChainReader, err = headerreader.New(
+				ctx,
+				l1Client,
+				func() *headerreader.Config { return &liveNodeConfig.Get().Execution.ParentChainReader },
+				arbSys,
+			)
+			if err != nil {
+				log.Error("failed to create parent chain reader for external mode", "err", err)
+				return 1
+			}
+		}
+
+		// Create Sequencer if enabled (handles transaction ordering/timing)
+		var sequencer *gethexec.Sequencer
+		if nodeConfig.Execution.Sequencer.Enable {
+			seqConfigFetcher := func() *gethexec.SequencerConfig { return &liveNodeConfig.Get().Execution.Sequencer }
+			sequencer, err = gethexec.NewSequencer(
+				execEngine,
+				parentChainReader,
+				seqConfigFetcher,
+				new(big.Int).SetUint64(nodeConfig.ParentChain.ID),
+			)
+			if err != nil {
+				log.Error("failed to create sequencer for external mode", "err", err)
+				return 1
+			}
+		}
+
+		// Create NethermindExecutionClient with the internal ExecutionEngine and Sequencer
+		externalClient, err := nethexec.NewNethermindExecutionClient(
+			nodeConfig.Execution.NethermindUrl,
+			nodeConfig.Execution.NethermindWsUrl,
+			execEngine, // Pass internal execution engine for delayed message handling
+			sequencer,  // Pass internal sequencer for sequencing operations
+		)
+		if err != nil {
+			log.Crit("failed to create external execution client", "err", err)
+			return 1
+		}
+		execClient = externalClient
+		execSequencer = externalClient
+		execRecorder = externalClient
+		arbOSVersionGetter = externalClient
+	} else {
+		// Use internal Geth execution node (default)
+		var err error
+		execNode, err = gethexec.CreateExecutionNode(
+			ctx,
+			stack,
+			chainDb,
+			l2BlockChain,
+			l1Client,
+			&ExecutionNodeConfigFetcher{liveNodeConfig},
+			new(big.Int).SetUint64(nodeConfig.ParentChain.ID),
+			liveNodeConfig.Get().Node.TransactionStreamer.SyncTillBlock,
+		)
+		if err != nil {
+			log.Error("failed to create execution node", "err", err)
+			return 1
+		}
+		execClient = execNode
+		execSequencer = execNode
+		execRecorder = execNode
+		arbOSVersionGetter = execNode
+	}
+
+	currentNode, err = arbnode.CreateNodeFullExecutionClient(
 		ctx,
 		stack,
-		execNode,
-		execNode,
-		execNode,
-		execNode,
+		execClient,
+		execSequencer,
+		execRecorder,
+		arbOSVersionGetter,
 		arbDb,
 		&ConsensusNodeConfigFetcher{liveNodeConfig},
 		l2BlockChain.Config(),
@@ -677,6 +777,10 @@ func mainImpl() int {
 
 	gqlConf := nodeConfig.GraphQL
 	if gqlConf.Enable {
+		if execNode == nil {
+			log.Error("GraphQL is not supported with external execution mode")
+			return 1
+		}
 		if err := graphql.New(stack, execNode.Backend.APIBackend(), execNode.FilterSystem, gqlConf.CORSDomain, gqlConf.VHosts); err != nil {
 			log.Error("failed to register the GraphQL service", "err", err)
 			return 1
@@ -713,9 +817,12 @@ func mainImpl() int {
 		}
 	}
 
-	err = execNode.InitializeTimeboost(ctx, chainInfo.ChainConfig)
-	if err != nil {
-		fatalErrChan <- fmt.Errorf("error initializing timeboost: %w", err)
+	// Timeboost is only available with internal execution mode
+	if execNode != nil {
+		err = execNode.InitializeTimeboost(ctx, chainInfo.ChainConfig)
+		if err != nil {
+			fatalErrChan <- fmt.Errorf("error initializing timeboost: %w", err)
+		}
 	}
 
 	err = nil
