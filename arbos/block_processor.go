@@ -250,6 +250,10 @@ func ProduceBlockAdvanced(
 		txIndex++
 		types.SetTransactionIndex(txIndex)
 
+		if types.IsTargetBlock() {
+			types.OLog2(fmt.Sprintf("spec blockNumber=%d timestamp=%d isCancun=%t cancunTim=%d", header.Number, header.Time, chainConfig.IsCancun(header.Number, header.Time, arbState.ArbOSVersion())))
+		}
+
 		// repeatedly process the next tx, doing redeems created along the way in FIFO order
 
 		var tx *types.Transaction
