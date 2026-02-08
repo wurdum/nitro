@@ -62,6 +62,43 @@ type setConsensusSyncDataParams struct {
 	UpdatedAt       time.Time              `json:"updatedAt"`
 }
 
+// RPC intermediate types for deserializing Nethermind sequencer responses.
+// Field names must match C# [JsonPropertyName] attributes.
+type rpcMsgResult struct {
+	Hash     common.Hash `json:"hash"`
+	SendRoot common.Hash `json:"sendRoot"`
+}
+
+type rpcSequencedMsg struct {
+	MsgIdx        uint64                         `json:"msgIdx"`
+	MsgWithMeta   arbostypes.MessageWithMetadata `json:"msgWithMeta"`
+	MsgResult     *rpcMsgResult                  `json:"msgResult"`
+	BlockMetadata []byte                         `json:"blockMetadata"`
+}
+
+func (r *rpcSequencedMsg) toSequencedMsg() *execution.SequencedMsg {
+	if r == nil {
+		return nil
+	}
+	msg := &execution.SequencedMsg{
+		MsgIdx:        arbutil.MessageIndex(r.MsgIdx),
+		MsgWithMeta:   r.MsgWithMeta,
+		BlockMetadata: common.BlockMetadata(r.BlockMetadata),
+	}
+	if r.MsgResult != nil {
+		msg.MsgResult = &execution.MessageResult{
+			BlockHash: r.MsgResult.Hash,
+			SendRoot:  r.MsgResult.SendRoot,
+		}
+	}
+	return msg
+}
+
+type rpcStartSequencingResult struct {
+	SequencedMsg   *rpcSequencedMsg `json:"sequencedMsg"`
+	WaitDurationMs int64            `json:"waitDurationMs"`
+}
+
 // InitMessageDigester is an interface for processing init messages
 type InitMessageDigester interface {
 	DigestInitMessage(ctx context.Context, initialL1BaseFee *big.Int, serializedChainConfig []byte) *execution.MessageResult
@@ -300,4 +337,100 @@ func (c *NethRpcClient) FullSyncProgressMap(ctx context.Context) (map[string]int
 		return nil, fmt.Errorf("failed to call FullSyncProgressMap: %w", err)
 	}
 	return result, nil
+}
+
+func (c *NethRpcClient) StartSequencing(ctx context.Context) (*execution.SequencedMsg, time.Duration, error) {
+	log.Debug("Making JSON-RPC call to nitroexecution_startSequencing", "url", c.url)
+	var result rpcStartSequencingResult
+	if err := c.client.CallContext(ctx, &result, "nitroexecution_startSequencing"); err != nil {
+		log.Error("Failed to call nitroexecution_startSequencing", "error", err)
+		return nil, 0, fmt.Errorf("failed to call nitroexecution_startSequencing: %w", err)
+	}
+	return result.SequencedMsg.toSequencedMsg(), time.Duration(result.WaitDurationMs) * time.Millisecond, nil
+}
+
+func (c *NethRpcClient) EndSequencing(ctx context.Context, errWhileSequencing error) error {
+	log.Debug("Making JSON-RPC call to nitroexecution_endSequencing", "url", c.url)
+	var errStr *string
+	if errWhileSequencing != nil {
+		s := errWhileSequencing.Error()
+		errStr = &s
+	}
+	var result any
+	if err := c.client.CallContext(ctx, &result, "nitroexecution_endSequencing", errStr); err != nil {
+		log.Error("Failed to call nitroexecution_endSequencing", "error", err)
+		return fmt.Errorf("failed to call nitroexecution_endSequencing: %w", err)
+	}
+	return nil
+}
+
+func (c *NethRpcClient) EnqueueDelayedMessages(ctx context.Context, msgs []*arbostypes.L1IncomingMessage, firstMsgIdx uint64) error {
+	log.Debug("Making JSON-RPC call to nitroexecution_enqueueDelayedMessages",
+		"url", c.url, "count", len(msgs), "firstMsgIdx", firstMsgIdx)
+	var result any
+	if err := c.client.CallContext(ctx, &result, "nitroexecution_enqueueDelayedMessages", msgs, firstMsgIdx); err != nil {
+		log.Error("Failed to call nitroexecution_enqueueDelayedMessages", "error", err)
+		return fmt.Errorf("failed to call nitroexecution_enqueueDelayedMessages: %w", err)
+	}
+	return nil
+}
+
+func (c *NethRpcClient) AppendLastSequencedBlock(ctx context.Context) error {
+	log.Debug("Making JSON-RPC call to nitroexecution_appendLastSequencedBlock", "url", c.url)
+	var result any
+	if err := c.client.CallContext(ctx, &result, "nitroexecution_appendLastSequencedBlock"); err != nil {
+		log.Error("Failed to call nitroexecution_appendLastSequencedBlock", "error", err)
+		return fmt.Errorf("failed to call nitroexecution_appendLastSequencedBlock: %w", err)
+	}
+	return nil
+}
+
+func (c *NethRpcClient) NextDelayedMessageNumber(ctx context.Context) (uint64, error) {
+	log.Debug("Making JSON-RPC call to nitroexecution_nextDelayedMessageNumber", "url", c.url)
+	var result hexutil.Uint64
+	if err := c.client.CallContext(ctx, &result, "nitroexecution_nextDelayedMessageNumber"); err != nil {
+		log.Error("Failed to call nitroexecution_nextDelayedMessageNumber", "error", err)
+		return 0, fmt.Errorf("failed to call nitroexecution_nextDelayedMessageNumber: %w", err)
+	}
+	return uint64(result), nil
+}
+
+func (c *NethRpcClient) ResequenceReorgedMessage(ctx context.Context, msg *arbostypes.MessageWithMetadata) (*execution.SequencedMsg, error) {
+	log.Debug("Making JSON-RPC call to nitroexecution_resequenceReorgedMessage", "url", c.url)
+	var result *rpcSequencedMsg
+	if err := c.client.CallContext(ctx, &result, "nitroexecution_resequenceReorgedMessage", msg); err != nil {
+		log.Error("Failed to call nitroexecution_resequenceReorgedMessage", "error", err)
+		return nil, fmt.Errorf("failed to call nitroexecution_resequenceReorgedMessage: %w", err)
+	}
+	return result.toSequencedMsg(), nil
+}
+
+func (c *NethRpcClient) Pause(ctx context.Context) error {
+	log.Debug("Making JSON-RPC call to nitroexecution_pause", "url", c.url)
+	var result any
+	if err := c.client.CallContext(ctx, &result, "nitroexecution_pause"); err != nil {
+		log.Error("Failed to call nitroexecution_pause", "error", err)
+		return fmt.Errorf("failed to call nitroexecution_pause: %w", err)
+	}
+	return nil
+}
+
+func (c *NethRpcClient) Activate(ctx context.Context) error {
+	log.Debug("Making JSON-RPC call to nitroexecution_activate", "url", c.url)
+	var result any
+	if err := c.client.CallContext(ctx, &result, "nitroexecution_activate"); err != nil {
+		log.Error("Failed to call nitroexecution_activate", "error", err)
+		return fmt.Errorf("failed to call nitroexecution_activate: %w", err)
+	}
+	return nil
+}
+
+func (c *NethRpcClient) ForwardTo(ctx context.Context, url string) error {
+	log.Debug("Making JSON-RPC call to nitroexecution_forwardTo", "url", c.url, "forwardUrl", url)
+	var result any
+	if err := c.client.CallContext(ctx, &result, "nitroexecution_forwardTo", url); err != nil {
+		log.Error("Failed to call nitroexecution_forwardTo", "error", err)
+		return fmt.Errorf("failed to call nitroexecution_forwardTo: %w", err)
+	}
+	return nil
 }

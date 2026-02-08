@@ -18,12 +18,13 @@ import (
 )
 
 // NethermindExecutionClient wraps NethRpcClient to implement Nitro's execution interfaces.
-// Execution methods are delegated to Nethermind via RPC, while sequencing methods
-// are delegated to Nitro's internal Sequencer and ExecutionEngine.
+// Execution methods are always delegated to Nethermind via RPC.
+// Sequencing methods are delegated to Nethermind via RPC when execEngine/sequencer are nil
+// (external sequencer mode), or to internal Go components when provided (internal sequencer mode).
 type NethermindExecutionClient struct {
 	rpcClient  *NethRpcClient
-	execEngine *gethexec.ExecutionEngine // Internal execution engine for delayed messages
-	sequencer  *gethexec.Sequencer       // Internal sequencer for sequencing operations
+	execEngine *gethexec.ExecutionEngine // Optional: internal execution engine for sequencing
+	sequencer  *gethexec.Sequencer       // Optional: internal sequencer
 }
 
 func NewNethermindExecutionClient(url string, wsUrl string, execEngine *gethexec.ExecutionEngine, sequencer *gethexec.Sequencer) (*NethermindExecutionClient, error) {
@@ -197,80 +198,101 @@ func (p *NethermindExecutionClient) StopAndWait() {
 }
 
 // Pause implements ExecutionSequencer.Pause
-// Delegates to internal sequencer
+// Uses internal sequencer if available, otherwise delegates to Nethermind via RPC.
 func (p *NethermindExecutionClient) Pause() {
 	if p.sequencer != nil {
 		p.sequencer.Pause()
+		return
+	}
+	if err := p.rpcClient.Pause(context.Background()); err != nil {
+		log.Error("Failed to call Pause on Nethermind", "error", err)
 	}
 }
 
 // Activate implements ExecutionSequencer.Activate
-// Delegates to internal sequencer
+// Uses internal sequencer if available, otherwise delegates to Nethermind via RPC.
 func (p *NethermindExecutionClient) Activate() {
 	if p.sequencer != nil {
 		p.sequencer.Activate()
+		return
+	}
+	if err := p.rpcClient.Activate(context.Background()); err != nil {
+		log.Error("Failed to call Activate on Nethermind", "error", err)
 	}
 }
 
 // ForwardTo implements ExecutionSequencer.ForwardTo
-// Delegates to internal sequencer
+// Uses internal sequencer if available, otherwise delegates to Nethermind via RPC.
 func (p *NethermindExecutionClient) ForwardTo(url string) error {
-	if p.sequencer == nil {
-		return fmt.Errorf("sequencer not initialized")
+	if p.sequencer != nil {
+		return p.sequencer.ForwardTo(url)
 	}
-	return p.sequencer.ForwardTo(url)
+	return p.rpcClient.ForwardTo(context.Background(), url)
 }
 
 // StartSequencing implements ExecutionSequencer.StartSequencing
-// Delegates to internal sequencer
+// Uses internal sequencer if available, otherwise delegates to Nethermind via RPC.
 func (p *NethermindExecutionClient) StartSequencing(ctx context.Context) (*execution.SequencedMsg, time.Duration) {
-	if p.sequencer == nil {
+	if p.sequencer != nil {
+		return p.sequencer.StartSequencing(ctx)
+	}
+	msg, dur, err := p.rpcClient.StartSequencing(ctx)
+	if err != nil {
+		log.Error("Failed to call StartSequencing on Nethermind", "error", err)
 		return nil, 0
 	}
-	return p.sequencer.StartSequencing(ctx)
+	return msg, dur
 }
 
 // EndSequencing implements ExecutionSequencer.EndSequencing
-// Delegates to internal sequencer
+// Uses internal sequencer if available, otherwise delegates to Nethermind via RPC.
 func (p *NethermindExecutionClient) EndSequencing(ctx context.Context, errWhileSequencing error) {
 	if p.sequencer != nil {
 		p.sequencer.EndSequencing(ctx, errWhileSequencing)
+		return
+	}
+	if err := p.rpcClient.EndSequencing(ctx, errWhileSequencing); err != nil {
+		log.Error("Failed to call EndSequencing on Nethermind", "error", err)
 	}
 }
 
 // EnqueueDelayedMessages implements ExecutionSequencer.EnqueueDelayedMessages
-// Delegates to internal execution engine
+// Uses internal execution engine if available, otherwise delegates to Nethermind via RPC.
 func (p *NethermindExecutionClient) EnqueueDelayedMessages(msgs []*arbostypes.L1IncomingMessage, firstMsgIdx uint64) {
-	if p.sequencer != nil && p.execEngine != nil {
+	if p.execEngine != nil {
 		p.execEngine.EnqueueDelayedMessages(msgs, firstMsgIdx)
+		return
+	}
+	if err := p.rpcClient.EnqueueDelayedMessages(context.Background(), msgs, firstMsgIdx); err != nil {
+		log.Error("Failed to call EnqueueDelayedMessages on Nethermind", "error", err)
 	}
 }
 
 // AppendLastSequencedBlock implements ExecutionSequencer.AppendLastSequencedBlock
-// Delegates to internal execution engine
+// Uses internal execution engine if available, otherwise delegates to Nethermind via RPC.
 func (p *NethermindExecutionClient) AppendLastSequencedBlock() error {
-	if p.execEngine == nil {
-		return fmt.Errorf("execution engine not initialized")
+	if p.execEngine != nil {
+		return p.execEngine.AppendLastSequencedBlock()
 	}
-	return p.execEngine.AppendLastSequencedBlock()
+	return p.rpcClient.AppendLastSequencedBlock(context.Background())
 }
 
 // ResequenceReorgedMessage implements ExecutionSequencer.ResequenceReorgedMessage
-// Delegates to internal execution engine
+// Uses internal execution engine if available, otherwise delegates to Nethermind via RPC.
 func (p *NethermindExecutionClient) ResequenceReorgedMessage(msg *arbostypes.MessageWithMetadata) (*execution.SequencedMsg, error) {
-	if p.execEngine == nil {
-		return nil, fmt.Errorf("execution engine not initialized")
+	if p.execEngine != nil {
+		return p.execEngine.ResequenceReorgedMessage(msg)
 	}
-	return p.execEngine.ResequenceReorgedMessage(msg)
+	return p.rpcClient.ResequenceReorgedMessage(context.Background(), msg)
 }
 
 // NextDelayedMessageNumber implements ExecutionSequencer.NextDelayedMessageNumber
-// Delegates to internal execution engine
+// Uses internal execution engine if available, otherwise delegates to Nethermind via RPC.
 func (p *NethermindExecutionClient) NextDelayedMessageNumber() (uint64, error) {
-	if p.execEngine == nil {
-		return 0, fmt.Errorf("execution engine not initialized")
+	if p.execEngine != nil {
+		return p.execEngine.NextDelayedMessageNumber()
 	}
-	return p.execEngine.NextDelayedMessageNumber()
+	return p.rpcClient.NextDelayedMessageNumber(context.Background())
 }
 
 // Synced implements ExecutionSequencer.Synced

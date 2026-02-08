@@ -563,37 +563,38 @@ func mainImpl() int {
 	var arbOSVersionGetter execution.ArbOSVersionGetter
 
 	if execMode == nethexec.ModeExternalOnly {
-		// For external mode: Create internal Sequencer, but use Nethermind for execution
-		// First create ExecutionEngine (needed by Sequencer for transaction processing)
-		execEngine, err := gethexec.NewExecutionEngine(
-			l2BlockChain,
-			liveNodeConfig.Get().Node.TransactionStreamer.SyncTillBlock,
-			nodeConfig.Execution.ExposeMultiGas,
-		)
-		if err != nil {
-			log.Error("failed to create execution engine for external mode", "err", err)
-			return 1
-		}
+		// For external mode: Create internal Sequencer if enabled (Nitro sequences, Nethermind executes),
+		// otherwise all sequencing is also delegated to Nethermind via RPC.
+		var execEngine *gethexec.ExecutionEngine
+		var sequencer *gethexec.Sequencer
 
-		// Create HeaderReader if l1Client is available (needed for gas price estimation)
-		var parentChainReader *headerreader.HeaderReader
-		if l1Client != nil && !reflect.ValueOf(l1Client).IsNil() {
-			arbSys, _ := precompilesgen.NewArbSys(types.ArbSysAddress, l1Client)
-			parentChainReader, err = headerreader.New(
-				ctx,
-				l1Client,
-				func() *headerreader.Config { return &liveNodeConfig.Get().Execution.ParentChainReader },
-				arbSys,
+		if nodeConfig.Execution.Sequencer.Enable {
+			var err error
+			execEngine, err = gethexec.NewExecutionEngine(
+				l2BlockChain,
+				liveNodeConfig.Get().Node.TransactionStreamer.SyncTillBlock,
+				nodeConfig.Execution.ExposeMultiGas,
 			)
 			if err != nil {
-				log.Error("failed to create parent chain reader for external mode", "err", err)
+				log.Error("failed to create execution engine for external mode", "err", err)
 				return 1
 			}
-		}
 
-		// Create Sequencer if enabled (handles transaction ordering/timing)
-		var sequencer *gethexec.Sequencer
-		if nodeConfig.Execution.Sequencer.Enable {
+			var parentChainReader *headerreader.HeaderReader
+			if l1Client != nil && !reflect.ValueOf(l1Client).IsNil() {
+				arbSys, _ := precompilesgen.NewArbSys(types.ArbSysAddress, l1Client)
+				parentChainReader, err = headerreader.New(
+					ctx,
+					l1Client,
+					func() *headerreader.Config { return &liveNodeConfig.Get().Execution.ParentChainReader },
+					arbSys,
+				)
+				if err != nil {
+					log.Error("failed to create parent chain reader for external mode", "err", err)
+					return 1
+				}
+			}
+
 			seqConfigFetcher := func() *gethexec.SequencerConfig { return &liveNodeConfig.Get().Execution.Sequencer }
 			sequencer, err = gethexec.NewSequencer(
 				execEngine,
@@ -607,12 +608,11 @@ func mainImpl() int {
 			}
 		}
 
-		// Create NethermindExecutionClient with the internal ExecutionEngine and Sequencer
 		externalClient, err := nethexec.NewNethermindExecutionClient(
 			nodeConfig.Execution.NethermindUrl,
 			nodeConfig.Execution.NethermindWsUrl,
-			execEngine, // Pass internal execution engine for delayed message handling
-			sequencer,  // Pass internal sequencer for sequencing operations
+			execEngine, // nil when sequencing is handled by Nethermind
+			sequencer,  // nil when sequencing is handled by Nethermind
 		)
 		if err != nil {
 			log.Crit("failed to create external execution client", "err", err)
