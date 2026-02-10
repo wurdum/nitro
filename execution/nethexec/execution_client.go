@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -13,29 +12,24 @@ import (
 	"github.com/offchainlabs/nitro/arbos/arbostypes"
 	"github.com/offchainlabs/nitro/arbutil"
 	"github.com/offchainlabs/nitro/execution"
-	"github.com/offchainlabs/nitro/execution/gethexec"
 	"github.com/offchainlabs/nitro/util/containers"
 )
 
-// NethermindExecutionClient wraps NethRpcClient to implement Nitro's execution interfaces.
-// Execution methods are always delegated to Nethermind via RPC.
-// Sequencing methods are delegated to Nethermind via RPC when execEngine/sequencer are nil
-// (external sequencer mode), or to internal Go components when provided (internal sequencer mode).
+// NethermindExecutionClient implements ExecutionClient by delegating to Nethermind via RPC.
+// It handles execution-only concerns: message digestion, finality, reorgs, state queries.
+// It does NOT implement ExecutionSequencer — use NethermindSequencerClient or
+// InternalSequencerWrapper for sequencing.
 type NethermindExecutionClient struct {
-	rpcClient  *NethRpcClient
-	execEngine *gethexec.ExecutionEngine // Optional: internal execution engine for sequencing
-	sequencer  *gethexec.Sequencer       // Optional: internal sequencer
+	rpcClient *NethRpcClient
 }
 
-func NewNethermindExecutionClient(url string, wsUrl string, execEngine *gethexec.ExecutionEngine, sequencer *gethexec.Sequencer) (*NethermindExecutionClient, error) {
+func NewNethermindExecutionClient(url string, wsUrl string) (*NethermindExecutionClient, error) {
 	rpcClient, err := NewNethRpcClient(url, wsUrl)
 	if err != nil {
 		return nil, err
 	}
 	return &NethermindExecutionClient{
-		rpcClient:  rpcClient,
-		execEngine: execEngine,
-		sequencer:  sequencer,
+		rpcClient: rpcClient,
 	}, nil
 }
 
@@ -82,7 +76,6 @@ func (p *NethermindExecutionClient) SetConsensusSyncData(syncData *execution.Con
 }
 
 // Reorg implements ExecutionClient.Reorg
-// Note: main Nitro's interface has 2 parameters (no oldMessages)
 func (p *NethermindExecutionClient) Reorg(msgIdxOfFirstMsgToAdd arbutil.MessageIndex, newMessages []arbostypes.MessageWithMetadataAndBlockInfo) containers.PromiseInterface[[]*execution.MessageResult] {
 	promise := containers.NewPromise[[]*execution.MessageResult](nil)
 	go func() {
@@ -173,7 +166,7 @@ func (p *NethermindExecutionClient) TriggerMaintenance() containers.PromiseInter
 
 // ShouldTriggerMaintenance implements ExecutionClient.ShouldTriggerMaintenance
 func (p *NethermindExecutionClient) ShouldTriggerMaintenance() containers.PromiseInterface[bool] {
-	return containers.NewReadyPromise(false, nil) // Conservative default - don't trigger maintenance
+	return containers.NewReadyPromise(false, nil)
 }
 
 // MaintenanceStatus implements ExecutionClient.MaintenanceStatus
@@ -186,7 +179,6 @@ func (p *NethermindExecutionClient) Start(ctx context.Context) error {
 	if p.rpcClient == nil {
 		return fmt.Errorf("RPC client is not initialized")
 	}
-	// TODO: Add a health check RPC call to verify Nethermind is accessible
 	return nil
 }
 
@@ -197,124 +189,6 @@ func (p *NethermindExecutionClient) StopAndWait() {
 	}
 }
 
-// Pause implements ExecutionSequencer.Pause
-// Uses internal sequencer if available, otherwise delegates to Nethermind via RPC.
-func (p *NethermindExecutionClient) Pause() {
-	if p.sequencer != nil {
-		p.sequencer.Pause()
-		return
-	}
-	if err := p.rpcClient.Pause(context.Background()); err != nil {
-		log.Error("Failed to call Pause on Nethermind", "error", err)
-	}
-}
-
-// Activate implements ExecutionSequencer.Activate
-// Uses internal sequencer if available, otherwise delegates to Nethermind via RPC.
-func (p *NethermindExecutionClient) Activate() {
-	if p.sequencer != nil {
-		p.sequencer.Activate()
-		return
-	}
-	if err := p.rpcClient.Activate(context.Background()); err != nil {
-		log.Error("Failed to call Activate on Nethermind", "error", err)
-	}
-}
-
-// ForwardTo implements ExecutionSequencer.ForwardTo
-// Uses internal sequencer if available, otherwise delegates to Nethermind via RPC.
-func (p *NethermindExecutionClient) ForwardTo(url string) error {
-	if p.sequencer != nil {
-		return p.sequencer.ForwardTo(url)
-	}
-	return p.rpcClient.ForwardTo(context.Background(), url)
-}
-
-// StartSequencing implements ExecutionSequencer.StartSequencing
-// Uses internal sequencer if available, otherwise delegates to Nethermind via RPC.
-func (p *NethermindExecutionClient) StartSequencing(ctx context.Context) (*execution.SequencedMsg, time.Duration) {
-	if p.sequencer != nil {
-		return p.sequencer.StartSequencing(ctx)
-	}
-	msg, dur, err := p.rpcClient.StartSequencing(ctx)
-	if err != nil {
-		log.Error("Failed to call StartSequencing on Nethermind", "error", err)
-		return nil, 0
-	}
-	return msg, dur
-}
-
-// EndSequencing implements ExecutionSequencer.EndSequencing
-// Uses internal sequencer if available, otherwise delegates to Nethermind via RPC.
-func (p *NethermindExecutionClient) EndSequencing(ctx context.Context, errWhileSequencing error) {
-	if p.sequencer != nil {
-		p.sequencer.EndSequencing(ctx, errWhileSequencing)
-		return
-	}
-	if err := p.rpcClient.EndSequencing(ctx, errWhileSequencing); err != nil {
-		log.Error("Failed to call EndSequencing on Nethermind", "error", err)
-	}
-}
-
-// EnqueueDelayedMessages implements ExecutionSequencer.EnqueueDelayedMessages
-// Uses internal execution engine if available, otherwise delegates to Nethermind via RPC.
-func (p *NethermindExecutionClient) EnqueueDelayedMessages(msgs []*arbostypes.L1IncomingMessage, firstMsgIdx uint64) {
-	if p.execEngine != nil {
-		p.execEngine.EnqueueDelayedMessages(msgs, firstMsgIdx)
-		return
-	}
-	if err := p.rpcClient.EnqueueDelayedMessages(context.Background(), msgs, firstMsgIdx); err != nil {
-		log.Error("Failed to call EnqueueDelayedMessages on Nethermind", "error", err)
-	}
-}
-
-// AppendLastSequencedBlock implements ExecutionSequencer.AppendLastSequencedBlock
-// Uses internal execution engine if available, otherwise delegates to Nethermind via RPC.
-func (p *NethermindExecutionClient) AppendLastSequencedBlock() error {
-	if p.execEngine != nil {
-		return p.execEngine.AppendLastSequencedBlock()
-	}
-	return p.rpcClient.AppendLastSequencedBlock(context.Background())
-}
-
-// ResequenceReorgedMessage implements ExecutionSequencer.ResequenceReorgedMessage
-// Uses internal execution engine if available, otherwise delegates to Nethermind via RPC.
-func (p *NethermindExecutionClient) ResequenceReorgedMessage(msg *arbostypes.MessageWithMetadata) (*execution.SequencedMsg, error) {
-	if p.execEngine != nil {
-		return p.execEngine.ResequenceReorgedMessage(msg)
-	}
-	return p.rpcClient.ResequenceReorgedMessage(context.Background(), msg)
-}
-
-// NextDelayedMessageNumber implements ExecutionSequencer.NextDelayedMessageNumber
-// Uses internal execution engine if available, otherwise delegates to Nethermind via RPC.
-func (p *NethermindExecutionClient) NextDelayedMessageNumber() (uint64, error) {
-	if p.execEngine != nil {
-		return p.execEngine.NextDelayedMessageNumber()
-	}
-	return p.rpcClient.NextDelayedMessageNumber(context.Background())
-}
-
-// Synced implements ExecutionSequencer.Synced
-func (p *NethermindExecutionClient) Synced(ctx context.Context) bool {
-	synced, err := p.rpcClient.Synced(ctx)
-	if err != nil {
-		log.Error("Failed to get Synced status from Nethermind", "error", err)
-		return false // Conservative default on error
-	}
-	return synced
-}
-
-// FullSyncProgressMap implements ExecutionSequencer.FullSyncProgressMap
-func (p *NethermindExecutionClient) FullSyncProgressMap(ctx context.Context) map[string]interface{} {
-	progressMap, err := p.rpcClient.FullSyncProgressMap(ctx)
-	if err != nil {
-		log.Error("Failed to get FullSyncProgressMap from Nethermind", "error", err)
-		return map[string]interface{}{} // Empty map on error
-	}
-	return progressMap
-}
-
 // RecordBlockCreation implements ExecutionRecorder.RecordBlockCreation
 func (p *NethermindExecutionClient) RecordBlockCreation(ctx context.Context, pos arbutil.MessageIndex, msg *arbostypes.MessageWithMetadata, wasmTargets []rawdb.WasmTarget) (*execution.RecordResult, error) {
 	return nil, fmt.Errorf("RecordBlockCreation not implemented for external execution")
@@ -322,7 +196,6 @@ func (p *NethermindExecutionClient) RecordBlockCreation(ctx context.Context, pos
 
 // MarkValid implements ExecutionRecorder.MarkValid
 func (p *NethermindExecutionClient) MarkValid(pos arbutil.MessageIndex, resultHash common.Hash) {
-	// no-op for external execution
 }
 
 // PrepareForRecord implements ExecutionRecorder.PrepareForRecord
@@ -337,12 +210,33 @@ func (p *NethermindExecutionClient) ArbOSVersionForMessageIndex(msgIdx arbutil.M
 
 // SetConsensusClient implements ExecutionNodeBridge.SetConsensusClient
 func (p *NethermindExecutionClient) SetConsensusClient(consensus execution.FullConsensusClient) {
-	// no-op until consensus path is implemented
 }
 
 // DigestInitMessage implements InitMessageDigester.DigestInitMessage
 func (p *NethermindExecutionClient) DigestInitMessage(ctx context.Context, initialL1BaseFee *big.Int, serializedChainConfig []byte) *execution.MessageResult {
 	return p.rpcClient.DigestInitMessage(ctx, initialL1BaseFee, serializedChainConfig)
+}
+
+// Synced queries Nethermind sync status via RPC.
+// Promoted to NethermindSequencerClient and InternalSequencerWrapper via embedding.
+func (p *NethermindExecutionClient) Synced(ctx context.Context) bool {
+	synced, err := p.rpcClient.Synced(ctx)
+	if err != nil {
+		log.Error("Failed to get Synced status from Nethermind", "error", err)
+		return false
+	}
+	return synced
+}
+
+// FullSyncProgressMap queries Nethermind sync progress via RPC.
+// Promoted to NethermindSequencerClient and InternalSequencerWrapper via embedding.
+func (p *NethermindExecutionClient) FullSyncProgressMap(ctx context.Context) map[string]interface{} {
+	progressMap, err := p.rpcClient.FullSyncProgressMap(ctx)
+	if err != nil {
+		log.Error("Failed to get FullSyncProgressMap from Nethermind", "error", err)
+		return map[string]interface{}{}
+	}
+	return progressMap
 }
 
 // Initialize implements ExecutionNodeBridge.Initialize

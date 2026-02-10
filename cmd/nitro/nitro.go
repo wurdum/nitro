@@ -56,7 +56,7 @@ import (
 	"github.com/offchainlabs/nitro/cmd/util/confighelpers"
 	"github.com/offchainlabs/nitro/daprovider"
 	"github.com/offchainlabs/nitro/daprovider/anytrust"
-	"github.com/offchainlabs/nitro/execution"
+
 	"github.com/offchainlabs/nitro/execution/gethexec"
 	"github.com/offchainlabs/nitro/execution/nethexec"
 	_ "github.com/offchainlabs/nitro/execution/nodeInterface"
@@ -452,7 +452,7 @@ func mainImpl() int {
 	switch execMode {
 	case nethexec.ModeInternalOnly:
 		initDigester = nethexec.NewFakeRemoteExecutionRpcClient()
-	case nethexec.ModeExternalOnly:
+	case nethexec.ModeExternalExecution, nethexec.ModeExternalSequencer:
 		nethRpcClient, err = nethexec.NewNethRpcClient(
 			nodeConfig.Execution.NethermindUrl,
 			nodeConfig.Execution.NethermindWsUrl,
@@ -556,27 +556,27 @@ func mainImpl() int {
 		wasmModuleRoot = locator.LatestWasmModuleRoot()
 	}
 
-	// Create execution client - either internal (Geth) or external (Nethermind)
-	var execClient execution.ExecutionClient
-	var execSequencer execution.ExecutionSequencer
-	var execRecorder execution.ExecutionRecorder
-	var arbOSVersionGetter execution.ArbOSVersionGetter
-
-	if execMode == nethexec.ModeExternalOnly {
-		// For external mode: Create internal Sequencer if enabled (Nitro sequences, Nethermind executes),
-		// otherwise all sequencing is also delegated to Nethermind via RPC.
-		var execEngine *gethexec.ExecutionEngine
-		var sequencer *gethexec.Sequencer
+	// Create execution client and consensus node based on execution mode
+	if execMode == nethexec.ModeExternalExecution {
+		// External execution mode: ExecutionClient delegated to Nethermind via RPC.
+		// Sequencing uses internal Geth components when Sequencer.Enable is true.
+		nethClient, err := nethexec.NewNethermindExecutionClient(
+			nodeConfig.Execution.NethermindUrl,
+			nodeConfig.Execution.NethermindWsUrl,
+		)
+		if err != nil {
+			log.Crit("failed to create external execution client", "err", err)
+			return 1
+		}
 
 		if nodeConfig.Execution.Sequencer.Enable {
-			var err error
-			execEngine, err = gethexec.NewExecutionEngine(
+			execEngine, err := gethexec.NewExecutionEngine(
 				l2BlockChain,
 				liveNodeConfig.Get().Node.TransactionStreamer.SyncTillBlock,
 				nodeConfig.Execution.ExposeMultiGas,
 			)
 			if err != nil {
-				log.Error("failed to create execution engine for external mode", "err", err)
+				log.Error("failed to create execution engine for external-execution mode", "err", err)
 				return 1
 			}
 
@@ -590,38 +590,111 @@ func mainImpl() int {
 					arbSys,
 				)
 				if err != nil {
-					log.Error("failed to create parent chain reader for external mode", "err", err)
+					log.Error("failed to create parent chain reader for external-execution mode", "err", err)
 					return 1
 				}
 			}
 
 			seqConfigFetcher := func() *gethexec.SequencerConfig { return &liveNodeConfig.Get().Execution.Sequencer }
-			sequencer, err = gethexec.NewSequencer(
+			sequencer, err := gethexec.NewSequencer(
 				execEngine,
 				parentChainReader,
 				seqConfigFetcher,
 				new(big.Int).SetUint64(nodeConfig.ParentChain.ID),
 			)
 			if err != nil {
-				log.Error("failed to create sequencer for external mode", "err", err)
+				log.Error("failed to create sequencer for external-execution mode", "err", err)
+				return 1
+			}
+
+			seqWrapper := nethexec.NewInternalSequencerWrapper(nethClient, execEngine, sequencer)
+			currentNode, err = arbnode.CreateNodeFullExecutionClient(
+				ctx,
+				stack,
+				nethClient,
+				seqWrapper,
+				nethClient,
+				nethClient,
+				arbDb,
+				&ConsensusNodeConfigFetcher{liveNodeConfig},
+				l2BlockChain.Config(),
+				l1Client,
+				&rollupAddrs,
+				l1TransactionOptsValidator,
+				l1TransactionOptsBatchPoster,
+				dataSigner,
+				fatalErrChan,
+				new(big.Int).SetUint64(nodeConfig.ParentChain.ID),
+				blobReader,
+				wasmModuleRoot,
+			)
+			if err != nil {
+				log.Error("failed to create node", "err", err)
+				return 1
+			}
+		} else {
+			// No sequencer — nil sequencer means no triggerSequencing loop
+			currentNode, err = arbnode.CreateNodeFullExecutionClient(
+				ctx,
+				stack,
+				nethClient,
+				nil,
+				nethClient,
+				nethClient,
+				arbDb,
+				&ConsensusNodeConfigFetcher{liveNodeConfig},
+				l2BlockChain.Config(),
+				l1Client,
+				&rollupAddrs,
+				l1TransactionOptsValidator,
+				l1TransactionOptsBatchPoster,
+				dataSigner,
+				fatalErrChan,
+				new(big.Int).SetUint64(nodeConfig.ParentChain.ID),
+				blobReader,
+				wasmModuleRoot,
+			)
+			if err != nil {
+				log.Error("failed to create node", "err", err)
 				return 1
 			}
 		}
-
-		externalClient, err := nethexec.NewNethermindExecutionClient(
+	} else if execMode == nethexec.ModeExternalSequencer {
+		// External sequencer mode: both ExecutionClient and ExecutionSequencer
+		// delegated to Nethermind via RPC. No internal Geth components.
+		nethClient, err := nethexec.NewNethermindExecutionClient(
 			nodeConfig.Execution.NethermindUrl,
 			nodeConfig.Execution.NethermindWsUrl,
-			execEngine, // nil when sequencing is handled by Nethermind
-			sequencer,  // nil when sequencing is handled by Nethermind
 		)
 		if err != nil {
 			log.Crit("failed to create external execution client", "err", err)
 			return 1
 		}
-		execClient = externalClient
-		execSequencer = externalClient
-		execRecorder = externalClient
-		arbOSVersionGetter = externalClient
+		seqClient := nethexec.NewNethermindSequencerClient(nethClient)
+		currentNode, err = arbnode.CreateNodeFullExecutionClient(
+			ctx,
+			stack,
+			nethClient,
+			seqClient,
+			nethClient,
+			nethClient,
+			arbDb,
+			&ConsensusNodeConfigFetcher{liveNodeConfig},
+			l2BlockChain.Config(),
+			l1Client,
+			&rollupAddrs,
+			l1TransactionOptsValidator,
+			l1TransactionOptsBatchPoster,
+			dataSigner,
+			fatalErrChan,
+			new(big.Int).SetUint64(nodeConfig.ParentChain.ID),
+			blobReader,
+			wasmModuleRoot,
+		)
+		if err != nil {
+			log.Error("failed to create node", "err", err)
+			return 1
+		}
 	} else {
 		// Use internal Geth execution node (default)
 		var err error
@@ -639,35 +712,18 @@ func mainImpl() int {
 			log.Error("failed to create execution node", "err", err)
 			return 1
 		}
-		execClient = execNode
-		execSequencer = execNode
-		execRecorder = execNode
-		arbOSVersionGetter = execNode
-	}
-
-	currentNode, err = arbnode.CreateNodeFullExecutionClient(
-		ctx,
-		stack,
-		execClient,
-		execSequencer,
-		execRecorder,
-		arbOSVersionGetter,
-		arbDb,
-		&ConsensusNodeConfigFetcher{liveNodeConfig},
-		l2BlockChain.Config(),
-		l1Client,
-		&rollupAddrs,
-		l1TransactionOptsValidator,
-		l1TransactionOptsBatchPoster,
-		dataSigner,
-		fatalErrChan,
-		new(big.Int).SetUint64(nodeConfig.ParentChain.ID),
-		blobReader,
-		wasmModuleRoot,
-	)
-	if err != nil {
-		log.Error("failed to create node", "err", err)
-		return 1
+		currentNode, err = arbnode.CreateNodeFullExecutionClient(
+			ctx, stack,
+			execNode, execNode, execNode, execNode,
+			arbDb, &ConsensusNodeConfigFetcher{liveNodeConfig}, l2BlockChain.Config(),
+			l1Client, &rollupAddrs, l1TransactionOptsValidator, l1TransactionOptsBatchPoster,
+			dataSigner, fatalErrChan, new(big.Int).SetUint64(nodeConfig.ParentChain.ID),
+			blobReader, wasmModuleRoot,
+		)
+		if err != nil {
+			log.Error("failed to create node", "err", err)
+			return 1
+		}
 	}
 
 	// Validate sequencer's MaxTxDataSize and batchPoster's MaxSize params.

@@ -70,7 +70,7 @@ type rpcMsgResult struct {
 }
 
 type rpcSequencedMsg struct {
-	MsgIdx        uint64                         `json:"msgIdx"`
+	MsgIdx        hexutil.Uint64                 `json:"msgIdx"`
 	MsgWithMeta   arbostypes.MessageWithMetadata `json:"msgWithMeta"`
 	MsgResult     *rpcMsgResult                  `json:"msgResult"`
 	BlockMetadata []byte                         `json:"blockMetadata"`
@@ -81,7 +81,7 @@ func (r *rpcSequencedMsg) toSequencedMsg() *execution.SequencedMsg {
 		return nil
 	}
 	msg := &execution.SequencedMsg{
-		MsgIdx:        arbutil.MessageIndex(r.MsgIdx),
+		MsgIdx:        arbutil.MessageIndex(uint64(r.MsgIdx)),
 		MsgWithMeta:   r.MsgWithMeta,
 		BlockMetadata: common.BlockMetadata(r.BlockMetadata),
 	}
@@ -96,7 +96,7 @@ func (r *rpcSequencedMsg) toSequencedMsg() *execution.SequencedMsg {
 
 type rpcStartSequencingResult struct {
 	SequencedMsg   *rpcSequencedMsg `json:"sequencedMsg"`
-	WaitDurationMs int64            `json:"waitDurationMs"`
+	WaitDurationMs hexutil.Uint64   `json:"waitDurationMs"`
 }
 
 // InitMessageDigester is an interface for processing init messages
@@ -346,7 +346,7 @@ func (c *NethRpcClient) StartSequencing(ctx context.Context) (*execution.Sequenc
 		log.Error("Failed to call nitroexecution_startSequencing", "error", err)
 		return nil, 0, fmt.Errorf("failed to call nitroexecution_startSequencing: %w", err)
 	}
-	return result.SequencedMsg.toSequencedMsg(), time.Duration(result.WaitDurationMs) * time.Millisecond, nil
+	return result.SequencedMsg.toSequencedMsg(), time.Duration(uint64(result.WaitDurationMs)) * time.Millisecond, nil
 }
 
 func (c *NethRpcClient) EndSequencing(ctx context.Context, errWhileSequencing error) error {

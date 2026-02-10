@@ -161,13 +161,13 @@ func (c *Config) Validate() error {
 	}
 	if c.ExecutionMode != "" {
 		switch c.ExecutionMode {
-		case "internal", "external":
+		case "internal", "external-execution", "external-sequencer":
 			// Valid modes
 		default:
-			return fmt.Errorf("invalid execution-mode: %s (must be 'internal' or 'external')", c.ExecutionMode)
+			return fmt.Errorf("invalid execution-mode: %s (must be 'internal', 'external-execution', or 'external-sequencer')", c.ExecutionMode)
 		}
-		if c.ExecutionMode == "external" && c.NethermindUrl == "" {
-			return fmt.Errorf("nethermind-url is required when execution-mode is 'external'")
+		if (c.ExecutionMode == "external-execution" || c.ExecutionMode == "external-sequencer") && c.NethermindUrl == "" {
+			return fmt.Errorf("nethermind-url is required when execution-mode is '%s'", c.ExecutionMode)
 		}
 	}
 	return nil
@@ -193,7 +193,7 @@ func ConfigAddOptions(prefix string, f *pflag.FlagSet) {
 	LiveTracingConfigAddOptions(prefix+".vmtrace", f)
 	f.String(prefix+".nethermind-url", ConfigDefault.NethermindUrl, "URL of external Nethermind execution client (e.g., http://localhost:20545)")
 	f.String(prefix+".nethermind-ws-url", ConfigDefault.NethermindWsUrl, "WebSocket URL of external Nethermind execution client (optional)")
-	f.String(prefix+".execution-mode", ConfigDefault.ExecutionMode, "execution mode: 'internal' (default, use built-in Geth) or 'external' (use Nethermind)")
+	f.String(prefix+".execution-mode", ConfigDefault.ExecutionMode, "execution mode: 'internal' (default), 'external-execution' (delegate execution to Nethermind), or 'external-sequencer' (delegate sequencing and execution to Nethermind)")
 }
 
 type LiveTracingConfig struct {
