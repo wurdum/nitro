@@ -452,7 +452,7 @@ func mainImpl() int {
 	switch execMode {
 	case nethexec.ModeInternalOnly:
 		initDigester = nethexec.NewFakeRemoteExecutionRpcClient()
-	case nethexec.ModeExternalExecution, nethexec.ModeExternalSequencer:
+	case nethexec.ModeExternalExecution, nethexec.ModeExternalSequencer, nethexec.ModeExternalExecutionCompare, nethexec.ModeExternalSequencerCompare:
 		nethRpcClient, err = nethexec.NewNethRpcClient(
 			nodeConfig.Execution.NethermindUrl,
 			nodeConfig.Execution.NethermindWsUrl,
@@ -556,174 +556,63 @@ func mainImpl() int {
 		wasmModuleRoot = locator.LatestWasmModuleRoot()
 	}
 
-	// Create execution client and consensus node based on execution mode
-	if execMode == nethexec.ModeExternalExecution {
-		// External execution mode: ExecutionClient delegated to Nethermind via RPC.
-		// Sequencing uses internal Geth components when Sequencer.Enable is true.
-		nethClient, err := nethexec.NewNethermindExecutionClient(
-			nodeConfig.Execution.NethermindUrl,
-			nodeConfig.Execution.NethermindWsUrl,
-		)
-		if err != nil {
-			log.Crit("failed to create external execution client", "err", err)
-			return 1
-		}
+	// Create execution topology and consensus node based on execution mode
+	topoDeps := nethexec.TopologyDeps{
+		Ctx:               ctx,
+		Stack:             stack,
+		ChainDb:           chainDb,
+		L2BlockChain:      l2BlockChain,
+		L1Client:          l1Client,
+		ParentChainID:     new(big.Int).SetUint64(nodeConfig.ParentChain.ID),
+		SyncTillBlock:     liveNodeConfig.Get().Node.TransactionStreamer.SyncTillBlock,
+		FatalErrChan:      fatalErrChan,
+		ExecConfigFetcher: &ExecutionNodeConfigFetcher{liveNodeConfig},
+		LiveNodeConfigGet: func() nethexec.LiveNodeConfigView {
+			cfg := liveNodeConfig.Get()
+			return nethexec.LiveNodeConfigView{
+				ParentChainReaderConfig: cfg.Execution.ParentChainReader,
+				SequencerConfig:         cfg.Execution.Sequencer,
+				ExposeMultiGas:          cfg.Execution.ExposeMultiGas,
+			}
+		},
+		NethermindUrl:    nodeConfig.Execution.NethermindUrl,
+		NethermindWsUrl:  nodeConfig.Execution.NethermindWsUrl,
+		SequencerEnabled: nodeConfig.Execution.Sequencer.Enable,
+	}
 
-		if nodeConfig.Execution.Sequencer.Enable {
-			execEngine, err := gethexec.NewExecutionEngine(
-				l2BlockChain,
-				liveNodeConfig.Get().Node.TransactionStreamer.SyncTillBlock,
-				nodeConfig.Execution.ExposeMultiGas,
-			)
-			if err != nil {
-				log.Error("failed to create execution engine for external-execution mode", "err", err)
-				return 1
-			}
+	var topology *nethexec.ExecutionTopology
+	switch execMode {
+	case nethexec.ModeInternalOnly:
+		topology, err = nethexec.BuildInternalTopology(topoDeps)
+	case nethexec.ModeExternalExecution:
+		topology, err = nethexec.BuildExternalExecutionTopology(topoDeps)
+	case nethexec.ModeExternalSequencer:
+		topology, err = nethexec.BuildExternalSequencerTopology(topoDeps)
+	case nethexec.ModeExternalExecutionCompare:
+		topology, err = nethexec.BuildComparisonExecutionTopology(topoDeps)
+	case nethexec.ModeExternalSequencerCompare:
+		topology, err = nethexec.BuildComparisonSequencerTopology(topoDeps)
+	default:
+		log.Error("unsupported execution mode", "mode", execMode)
+		return 1
+	}
+	if err != nil {
+		log.Error("failed to build execution topology", "mode", execMode, "err", err)
+		return 1
+	}
 
-			var parentChainReader *headerreader.HeaderReader
-			if l1Client != nil && !reflect.ValueOf(l1Client).IsNil() {
-				arbSys, _ := precompilesgen.NewArbSys(types.ArbSysAddress, l1Client)
-				parentChainReader, err = headerreader.New(
-					ctx,
-					l1Client,
-					func() *headerreader.Config { return &liveNodeConfig.Get().Execution.ParentChainReader },
-					arbSys,
-				)
-				if err != nil {
-					log.Error("failed to create parent chain reader for external-execution mode", "err", err)
-					return 1
-				}
-			}
-
-			seqConfigFetcher := func() *gethexec.SequencerConfig { return &liveNodeConfig.Get().Execution.Sequencer }
-			sequencer, err := gethexec.NewSequencer(
-				execEngine,
-				parentChainReader,
-				seqConfigFetcher,
-				new(big.Int).SetUint64(nodeConfig.ParentChain.ID),
-			)
-			if err != nil {
-				log.Error("failed to create sequencer for external-execution mode", "err", err)
-				return 1
-			}
-
-			seqWrapper := nethexec.NewInternalSequencerWrapper(nethClient, execEngine, sequencer)
-			currentNode, err = arbnode.CreateNodeFullExecutionClient(
-				ctx,
-				stack,
-				nethClient,
-				seqWrapper,
-				nethClient,
-				nethClient,
-				arbDb,
-				&ConsensusNodeConfigFetcher{liveNodeConfig},
-				l2BlockChain.Config(),
-				l1Client,
-				&rollupAddrs,
-				l1TransactionOptsValidator,
-				l1TransactionOptsBatchPoster,
-				dataSigner,
-				fatalErrChan,
-				new(big.Int).SetUint64(nodeConfig.ParentChain.ID),
-				blobReader,
-				wasmModuleRoot,
-			)
-			if err != nil {
-				log.Error("failed to create node", "err", err)
-				return 1
-			}
-		} else {
-			// No sequencer — nil sequencer means no triggerSequencing loop
-			currentNode, err = arbnode.CreateNodeFullExecutionClient(
-				ctx,
-				stack,
-				nethClient,
-				nil,
-				nethClient,
-				nethClient,
-				arbDb,
-				&ConsensusNodeConfigFetcher{liveNodeConfig},
-				l2BlockChain.Config(),
-				l1Client,
-				&rollupAddrs,
-				l1TransactionOptsValidator,
-				l1TransactionOptsBatchPoster,
-				dataSigner,
-				fatalErrChan,
-				new(big.Int).SetUint64(nodeConfig.ParentChain.ID),
-				blobReader,
-				wasmModuleRoot,
-			)
-			if err != nil {
-				log.Error("failed to create node", "err", err)
-				return 1
-			}
-		}
-	} else if execMode == nethexec.ModeExternalSequencer {
-		// External sequencer mode: both ExecutionClient and ExecutionSequencer
-		// delegated to Nethermind via RPC. No internal Geth components.
-		nethClient, err := nethexec.NewNethermindExecutionClient(
-			nodeConfig.Execution.NethermindUrl,
-			nodeConfig.Execution.NethermindWsUrl,
-		)
-		if err != nil {
-			log.Crit("failed to create external execution client", "err", err)
-			return 1
-		}
-		seqClient := nethexec.NewNethermindSequencerClient(nethClient)
-		currentNode, err = arbnode.CreateNodeFullExecutionClient(
-			ctx,
-			stack,
-			nethClient,
-			seqClient,
-			nethClient,
-			nethClient,
-			arbDb,
-			&ConsensusNodeConfigFetcher{liveNodeConfig},
-			l2BlockChain.Config(),
-			l1Client,
-			&rollupAddrs,
-			l1TransactionOptsValidator,
-			l1TransactionOptsBatchPoster,
-			dataSigner,
-			fatalErrChan,
-			new(big.Int).SetUint64(nodeConfig.ParentChain.ID),
-			blobReader,
-			wasmModuleRoot,
-		)
-		if err != nil {
-			log.Error("failed to create node", "err", err)
-			return 1
-		}
-	} else {
-		// Use internal Geth execution node (default)
-		var err error
-		execNode, err = gethexec.CreateExecutionNode(
-			ctx,
-			stack,
-			chainDb,
-			l2BlockChain,
-			l1Client,
-			&ExecutionNodeConfigFetcher{liveNodeConfig},
-			new(big.Int).SetUint64(nodeConfig.ParentChain.ID),
-			liveNodeConfig.Get().Node.TransactionStreamer.SyncTillBlock,
-		)
-		if err != nil {
-			log.Error("failed to create execution node", "err", err)
-			return 1
-		}
-		currentNode, err = arbnode.CreateNodeFullExecutionClient(
-			ctx, stack,
-			execNode, execNode, execNode, execNode,
-			arbDb, &ConsensusNodeConfigFetcher{liveNodeConfig}, l2BlockChain.Config(),
-			l1Client, &rollupAddrs, l1TransactionOptsValidator, l1TransactionOptsBatchPoster,
-			dataSigner, fatalErrChan, new(big.Int).SetUint64(nodeConfig.ParentChain.ID),
-			blobReader, wasmModuleRoot,
-		)
-		if err != nil {
-			log.Error("failed to create node", "err", err)
-			return 1
-		}
+	execNode = topology.ExecNode
+	currentNode, err = arbnode.CreateNodeFullExecutionClient(
+		ctx, stack,
+		topology.Client, topology.Sequencer, topology.Recorder, topology.ArbOSVer,
+		arbDb, &ConsensusNodeConfigFetcher{liveNodeConfig}, l2BlockChain.Config(),
+		l1Client, &rollupAddrs, l1TransactionOptsValidator, l1TransactionOptsBatchPoster,
+		dataSigner, fatalErrChan, new(big.Int).SetUint64(nodeConfig.ParentChain.ID),
+		blobReader, wasmModuleRoot,
+	)
+	if err != nil {
+		log.Error("failed to create node", "err", err)
+		return 1
 	}
 
 	// Validate sequencer's MaxTxDataSize and batchPoster's MaxSize params.

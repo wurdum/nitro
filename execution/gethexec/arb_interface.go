@@ -65,3 +65,7 @@ func (a *ArbInterface) BlockChain() *core.BlockChain {
 func (a *ArbInterface) ArbNode() interface{} {
 	return a.node
 }
+
+func (a *ArbInterface) SetTransactionPublisher(tp TransactionPublisher) {
+	a.txPublisher = tp
+}
