@@ -161,10 +161,10 @@ func (c *Config) Validate() error {
 	}
 	if c.ExecutionMode != "" {
 		switch c.ExecutionMode {
-		case "internal", "external-execution", "external-sequencer":
+		case "internal", "external-execution", "external-sequencer", "external-execution-compare", "external-sequencer-compare":
 			// Valid modes
 		default:
-			return fmt.Errorf("invalid execution-mode: %s (must be 'internal', 'external-execution', or 'external-sequencer')", c.ExecutionMode)
+			return fmt.Errorf("invalid execution-mode: %s (must be 'internal', 'external-execution', 'external-sequencer', external-execution-compare, or 'external-sequencer-compare')", c.ExecutionMode)
 		}
 		if (c.ExecutionMode == "external-execution" || c.ExecutionMode == "external-sequencer") && c.NethermindUrl == "" {
 			return fmt.Errorf("nethermind-url is required when execution-mode is '%s'", c.ExecutionMode)

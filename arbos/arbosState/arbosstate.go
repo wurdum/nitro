@@ -4,7 +4,6 @@
 package arbosState
 
 import (
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"math"
@@ -15,7 +14,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/triedb"
 	"github.com/ethereum/go-ethereum/triedb/hashdb"
@@ -262,8 +260,6 @@ func InitializeArbosState(stateDB vm.StateDB, burner burn.Burner, chainConfig *p
 
 	chainConfigStorage := sto.OpenStorageBackedBytes(chainConfigSubspace)
 	err = chainConfigStorage.Set(initMessage.SerializedChainConfig)
-
-	log.Info("SerializedChainConfig", base64.StdEncoding.EncodeToString(initMessage.SerializedChainConfig))
 
 	if err != nil {
 		return nil, err

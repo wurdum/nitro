@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/ethereum/go-ethereum/arbitrum_types"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -37,14 +38,14 @@ func (p *ComparatorTxPublisher) forwardToNethermind(ctx context.Context, tx *typ
 		log.Error("ComparatorTxPublisher: failed to encode tx for Nethermind", "label", label, "err", err)
 		return
 	}
-	if err := p.nethClient.CallContext(ctx, nil, "eth_sendRawTransaction", rawTx); err != nil {
+	if err := p.nethClient.CallContext(ctx, nil, "eth_sendRawTransaction", hexutil.Encode(rawTx)); err != nil {
 		log.Warn("ComparatorTxPublisher: Nethermind forwarding failed", "label", label, "err", err)
 	}
 }
 
 func (p *ComparatorTxPublisher) PublishTransaction(ctx context.Context, tx *types.Transaction, options *arbitrum_types.ConditionalOptions) error {
-	err := p.primary.PublishTransaction(ctx, tx, options)
 	p.forwardToNethermind(ctx, tx, "PublishTransaction")
+	err := p.primary.PublishTransaction(ctx, tx, options)
 	return err
 }
 

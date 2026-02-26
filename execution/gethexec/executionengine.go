@@ -290,6 +290,8 @@ func (s *ExecutionEngine) EnqueueDelayedMessages(msgs []*arbostypes.L1IncomingMe
 	s.delayedMsgsMutex.Lock()
 	defer s.delayedMsgsMutex.Unlock()
 
+	log.Info("SEQUENCER: EnqueueDelayedMessages")
+
 	for i, msg := range msgs {
 		s.delayedMsgs.Push(&delayedMsg{
 			msg:    msg,
@@ -504,6 +506,8 @@ func writeAndLog(pprof, trace *bytes.Buffer) {
 func (s *ExecutionEngine) AppendLastSequencedBlock() error {
 	s.createBlocksMutex.Lock()
 	defer s.createBlocksMutex.Unlock()
+
+	log.Info("SEQUENCER: AppendLastSequencedBlock")
 
 	if s.lastSequencedBlockInfo == nil {
 		return errors.New("no last sequenced block info")
@@ -954,9 +958,13 @@ func (s *ExecutionEngine) cacheL1PriceDataOfMsg(msgIdx arbutil.MessageIndex, blo
 // This helps in filling the cache, so that the next block creation is faster.
 func (s *ExecutionEngine) DigestMessage(msgIdx arbutil.MessageIndex, msg *arbostypes.MessageWithMetadata, msgForPrefetch *arbostypes.MessageWithMetadata) (*execution.MessageResult, error) {
 	if !s.createBlocksMutex.TryLock() {
+		log.Warn("EXECUTION: DigestMessage locked, exiting")
 		return nil, errors.New("createBlock mutex held")
 	}
 	defer s.createBlocksMutex.Unlock()
+
+	log.Warn("EXECUTION: DigestMessage")
+
 	return s.digestMessageWithBlockMutex(msgIdx, msg, msgForPrefetch)
 }
 

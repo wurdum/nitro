@@ -715,6 +715,8 @@ func (s *Sequencer) publishTransactionToQueue(queueCtx context.Context, tx *type
 		return queueCtx.Err()
 	}
 
+	log.Warn(fmt.Sprintf("SEQUENCER: Enqueued transaction %s", tx.Hash().String()))
+
 	return nil
 }
 
@@ -1388,6 +1390,8 @@ func (s *Sequencer) createBlockWithRegularTxs(ctx context.Context) (sequencedMsg
 		}
 	}
 
+	log.Info("SEQUENCER: Build block", "queueItems", len(queueItems), "madeBlock", madeBlock)
+
 	s.lastCreatedBlockWithRegularTxsInfo = &createdBlockInfo{
 		block:      block,
 		hooks:      hooks,
@@ -1398,6 +1402,8 @@ func (s *Sequencer) createBlockWithRegularTxs(ctx context.Context) (sequencedMsg
 }
 
 func (s *Sequencer) EndSequencing(ctx context.Context, errWhileSequencing error) {
+	log.Info("SEQUENCER: EndSequencing")
+
 	s.createBlockMutex.Lock()
 	defer s.createBlockMutex.Unlock()
 
@@ -1668,6 +1674,8 @@ func (s *Sequencer) Start(ctxIn context.Context) error {
 }
 
 func (s *Sequencer) StartSequencing(ctx context.Context) (*execution.SequencedMsg, time.Duration) {
+	log.Info("SEQUENCER: StartSequencing")
+
 	sequencedMsg, err := s.execEngine.SequenceDelayedMessage()
 	if err != nil {
 		return nil, 0

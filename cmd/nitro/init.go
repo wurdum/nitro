@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -887,6 +888,7 @@ func openInitializeChainDb(ctx context.Context, stack *node.Node, config *NodeCo
 				}
 			}
 			log.Info("Read serialized chain config from init message", "json", string(parsedInitMessage.SerializedChainConfig))
+			log.Info("SerializedChainConfig", base64.StdEncoding.EncodeToString(parsedInitMessage.SerializedChainConfig))
 		} else {
 			serializedChainConfig, err := json.Marshal(chainConfig)
 			if err != nil {
@@ -907,8 +909,8 @@ func openInitializeChainDb(ctx context.Context, stack *node.Node, config *NodeCo
 		}
 
 		// Trigger genesis block building at Nethermind (external execution) if configured
-		genesisResult := initDigester.DigestInitMessage(ctx, parsedInitMessage.InitialL1BaseFee, parsedInitMessage.SerializedChainConfig)
-		log.Info("DigestInitMessage completed", "blockHash", genesisResult.BlockHash, "sendRoot", genesisResult.SendRoot)
+		//genesisResult := initDigester.DigestInitMessage(ctx, parsedInitMessage.InitialL1BaseFee, parsedInitMessage.SerializedChainConfig)
+		//log.Info("DigestInitMessage completed", "blockHash", genesisResult.BlockHash, "sendRoot", genesisResult.SendRoot)
 
 		l2BlockChain, err = gethexec.WriteOrTestBlockChain(chainDb, cacheConfig, initDataReader, chainConfig, genesisArbOSInit, tracer, parsedInitMessage, &config.Execution.TxIndexer, config.Init.AccountsPerSync)
 		if err != nil {

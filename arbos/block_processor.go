@@ -226,6 +226,9 @@ func ProduceBlockAdvanced(
 	}
 
 	header := createNewHeader(lastBlockHeader, l1Info, baseFee, chainConfig)
+
+	log.Info(fmt.Sprintf("SEQUENCER: ProduceBlockAdvanced BlockNumber=%s", header.Number.String()))
+
 	// Note: blockGasLeft will diverge from the actual gas left during execution in the event of invalid txs,
 	// but it's only used as block-local representation limiting the amount of work done in a block.
 	blockGasLeft, _ := arbState.L2PricingState().PerBlockGasLimit()
@@ -394,6 +397,16 @@ func ProduceBlockAdvanced(
 
 			return receipt, result, nil
 		})()
+
+		if err != nil {
+			log.Warn(fmt.Sprintf("FAIL!!: %s", err))
+			log.Warn(fmt.Sprintf("BlockNumber: %s", header.Number.String()))
+		}
+
+		if result != nil && result.Failed() {
+			log.Warn(fmt.Sprintf("FAIL!!: %s", result.Err))
+			log.Warn(fmt.Sprintf("BlockNumber: %s", header.Number.String()))
+		}
 
 		// append the err, even if it is nil
 		if hooks != nil {
