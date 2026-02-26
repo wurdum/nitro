@@ -1554,6 +1554,7 @@ func (s *TransactionStreamer) triggerSequencing(ctx context.Context) time.Durati
 			log.Warn("Failed to read latest L1 header for sequencing context", "err", err)
 		} else if header != nil {
 			seqCtx.L1BlockNumber = arbutil.ParentHeaderToL1BlockNumber(header)
+			seqCtx.L1Timestamp = header.Time
 		}
 	}
 	seqCtx.Timestamp = uint64(time.Now().Unix())

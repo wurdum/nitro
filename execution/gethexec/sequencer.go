@@ -1313,9 +1313,7 @@ func (s *Sequencer) createBlockWithRegularTxs(ctx context.Context, seqCtx execut
 
 	timestamp := seqCtx.Timestamp
 	l1Block := seqCtx.L1BlockNumber
-	s.L1BlockAndTimeMutex.Lock()
-	l1Timestamp := s.l1Timestamp
-	s.L1BlockAndTimeMutex.Unlock()
+	l1Timestamp := seqCtx.L1Timestamp
 
 	if s.l1Reader != nil && (l1Block == 0 || math.Abs(float64(l1Timestamp)-float64(timestamp)) > config.MaxAcceptableTimestampDelta.Seconds()) {
 		for _, queueItem := range queueItems {

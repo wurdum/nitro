@@ -101,6 +101,7 @@ type rpcStartSequencingResult struct {
 
 type startSequencingParams struct {
 	L1BlockNumber hexutil.Uint64 `json:"l1BlockNumber"`
+	L1Timestamp   hexutil.Uint64 `json:"l1Timestamp"`
 	Timestamp     hexutil.Uint64 `json:"timestamp"`
 }
 
@@ -348,10 +349,11 @@ func (c *NethRpcClient) StartSequencing(ctx context.Context, seqCtx execution.Se
 	log.Debug("Making JSON-RPC call to nitroexecution_startSequencing", "url", c.url)
 	params := startSequencingParams{
 		L1BlockNumber: hexutil.Uint64(seqCtx.L1BlockNumber),
+		L1Timestamp:   hexutil.Uint64(seqCtx.L1Timestamp),
 		Timestamp:     hexutil.Uint64(seqCtx.Timestamp),
 	}
 	var result rpcStartSequencingResult
-	if err := c.client.CallContext(ctx, &result, "nitroexecution_startSequencing", params.L1BlockNumber, params.Timestamp); err != nil {
+	if err := c.client.CallContext(ctx, &result, "nitroexecution_startSequencing", params.L1BlockNumber, params.L1Timestamp, params.Timestamp); err != nil {
 		log.Error("Failed to call nitroexecution_startSequencing", "error", err)
 		return nil, 0, fmt.Errorf("failed to call nitroexecution_startSequencing: %w", err)
 	}

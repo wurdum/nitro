@@ -89,6 +89,7 @@ type ExecutionRecorder interface {
 
 type SequencingContext struct {
 	L1BlockNumber uint64
+	L1Timestamp   uint64
 	Timestamp     uint64
 }
 
