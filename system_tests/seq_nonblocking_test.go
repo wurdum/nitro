@@ -7,6 +7,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/offchainlabs/nitro/execution"
 )
 
 func TestSequencerDoesntBlockWithoutTransactions(t *testing.T) {
@@ -19,7 +21,7 @@ func TestSequencerDoesntBlockWithoutTransactions(t *testing.T) {
 	defer cleanup()
 
 	// This call will time out if the sequencer is blocking
-	_, nextSequenceTime := builder.L2.ExecNode.StartSequencing(ctx)
+	_, nextSequenceTime := builder.L2.ExecNode.StartSequencing(ctx, execution.SequencingContext{})
 	if nextSequenceTime == time.Duration(0) {
 		t.Fatal("Expected non-zero next sequence time")
 	}

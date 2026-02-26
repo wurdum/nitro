@@ -22,6 +22,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
@@ -39,6 +40,10 @@ import (
 	"github.com/offchainlabs/nitro/util/sharedmetrics"
 	"github.com/offchainlabs/nitro/util/stopwaiter"
 )
+
+type HeaderReaderInterface interface {
+	LastHeaderWithError() (*types.Header, error)
+}
 
 var (
 	messageTimer = metrics.NewRegisteredHistogram("arb/txstreamer/message/duration", nil, metrics.NewBoundedHistogramSample())
@@ -74,6 +79,7 @@ type TransactionStreamer struct {
 	broadcastServer *broadcaster.Broadcaster
 	inboxReader     *InboxReader
 	delayedBridge   *DelayedBridge
+	l1Reader        HeaderReaderInterface
 
 	trackBlockMetadataFrom arbutil.MessageIndex
 	syncTillMessage        arbutil.MessageIndex
@@ -127,6 +133,7 @@ func NewTransactionStreamer(
 	fatalErrChan chan<- error,
 	config TransactionStreamerConfigFetcher,
 	snapSyncConfig *SnapSyncConfig,
+	l1Reader HeaderReaderInterface,
 ) (*TransactionStreamer, error) {
 	streamer := &TransactionStreamer{
 		execClient:         execClient,
@@ -138,6 +145,7 @@ func NewTransactionStreamer(
 		fatalErrChan:       fatalErrChan,
 		config:             config,
 		snapSyncConfig:     snapSyncConfig,
+		l1Reader:           l1Reader,
 	}
 	err := streamer.cleanupInconsistentState()
 	if err != nil {
@@ -1540,7 +1548,17 @@ func (s *TransactionStreamer) triggerSequencing(ctx context.Context) time.Durati
 		return 50 * time.Millisecond
 	}
 
-	sequencedMsg, timeToWaitUntilNextSequencing := s.execSequencer.StartSequencing(ctx)
+	var seqCtx execution.SequencingContext
+	if s.l1Reader != nil {
+		if header, err := s.l1Reader.LastHeaderWithError(); err != nil {
+			log.Warn("Failed to read latest L1 header for sequencing context", "err", err)
+		} else if header != nil {
+			seqCtx.L1BlockNumber = arbutil.ParentHeaderToL1BlockNumber(header)
+		}
+	}
+	seqCtx.Timestamp = uint64(time.Now().Unix())
+
+	sequencedMsg, timeToWaitUntilNextSequencing := s.execSequencer.StartSequencing(ctx, seqCtx)
 	if sequencedMsg != nil {
 		err := s.WriteSequencedMsg(sequencedMsg)
 		if err != nil {

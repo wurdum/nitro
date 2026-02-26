@@ -1252,7 +1252,7 @@ func (s *Sequencer) getQueueItems(ctx context.Context, config *SequencerConfig) 
 	return queueItems, false
 }
 
-func (s *Sequencer) createBlockWithRegularTxs(ctx context.Context) (sequencedMsg *execution.SequencedMsg, returnValue bool) {
+func (s *Sequencer) createBlockWithRegularTxs(ctx context.Context, seqCtx execution.SequencingContext) (sequencedMsg *execution.SequencedMsg, returnValue bool) {
 	s.createBlockMutex.Lock()
 	defer s.createBlockMutex.Unlock()
 
@@ -1311,9 +1311,9 @@ func (s *Sequencer) createBlockWithRegularTxs(ctx context.Context) (sequencedMsg
 
 	s.handleInactive(forwarder, queueItems)
 
-	timestamp := time.Now().Unix()
+	timestamp := seqCtx.Timestamp
+	l1Block := seqCtx.L1BlockNumber
 	s.L1BlockAndTimeMutex.Lock()
-	l1Block := s.l1BlockNumber.Load()
 	l1Timestamp := s.l1Timestamp
 	s.L1BlockAndTimeMutex.Unlock()
 
@@ -1326,7 +1326,7 @@ func (s *Sequencer) createBlockWithRegularTxs(ctx context.Context) (sequencedMsg
 			"cannot sequence: unknown L1 block or L1 timestamp too far from local clock time",
 			"l1Block", l1Block,
 			"l1Timestamp", time.Unix(int64(l1Timestamp), 0),
-			"localTimestamp", time.Unix(timestamp, 0),
+			"localTimestamp", time.Unix(int64(timestamp), 0),
 		)
 		return nil, true
 	}
@@ -1335,7 +1335,7 @@ func (s *Sequencer) createBlockWithRegularTxs(ctx context.Context) (sequencedMsg
 		Kind:        arbostypes.L1MessageType_L2Message,
 		Poster:      l1pricing.BatchPosterAddress,
 		BlockNumber: l1Block,
-		Timestamp:   arbmath.SaturatingUCast[uint64](timestamp),
+		Timestamp:   timestamp,
 		RequestId:   nil,
 		L1BaseFee:   nil,
 	}
@@ -1390,8 +1390,6 @@ func (s *Sequencer) createBlockWithRegularTxs(ctx context.Context) (sequencedMsg
 		}
 	}
 
-	log.Info("SEQUENCER: Build block", "queueItems", len(queueItems), "madeBlock", madeBlock)
-
 	s.lastCreatedBlockWithRegularTxsInfo = &createdBlockInfo{
 		block:      block,
 		hooks:      hooks,
@@ -1402,8 +1400,6 @@ func (s *Sequencer) createBlockWithRegularTxs(ctx context.Context) (sequencedMsg
 }
 
 func (s *Sequencer) EndSequencing(ctx context.Context, errWhileSequencing error) {
-	log.Info("SEQUENCER: EndSequencing")
-
 	s.createBlockMutex.Lock()
 	defer s.createBlockMutex.Unlock()
 
@@ -1673,9 +1669,7 @@ func (s *Sequencer) Start(ctxIn context.Context) error {
 	return nil
 }
 
-func (s *Sequencer) StartSequencing(ctx context.Context) (*execution.SequencedMsg, time.Duration) {
-	log.Info("SEQUENCER: StartSequencing")
-
+func (s *Sequencer) StartSequencing(ctx context.Context, seqCtx execution.SequencingContext) (*execution.SequencedMsg, time.Duration) {
 	sequencedMsg, err := s.execEngine.SequenceDelayedMessage()
 	if err != nil {
 		return nil, 0
@@ -1684,7 +1678,7 @@ func (s *Sequencer) StartSequencing(ctx context.Context) (*execution.SequencedMs
 		return sequencedMsg, 0
 	}
 
-	sequencedMsg, waitUntilSequencingNextBlock := s.createBlockWithRegularTxs(ctx)
+	sequencedMsg, waitUntilSequencingNextBlock := s.createBlockWithRegularTxs(ctx, seqCtx)
 	if waitUntilSequencingNextBlock {
 		return sequencedMsg, s.config().MaxBlockSpeed
 	}

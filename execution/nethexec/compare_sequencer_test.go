@@ -49,7 +49,7 @@ func (f *fakeExecSequencer) ForwardTo(url string) error {
 	return nil
 }
 
-func (f *fakeExecSequencer) StartSequencing(_ context.Context) (*execution.SequencedMsg, time.Duration) {
+func (f *fakeExecSequencer) StartSequencing(_ context.Context, _ execution.SequencingContext) (*execution.SequencedMsg, time.Duration) {
 	return f.startSeqMsg, f.startSeqDur
 }
 
@@ -102,7 +102,7 @@ func TestComparatorSequencer_StartSequencing_Match(t *testing.T) {
 	client := NewComparatorClient(internal, external, fatalChan)
 	seq := NewComparatorSequencer(client, internal, external, fatalChan)
 
-	result, dur := seq.StartSequencing(context.Background())
+	result, dur := seq.StartSequencing(context.Background(), execution.SequencingContext{})
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -136,7 +136,7 @@ func TestComparatorSequencer_StartSequencing_Mismatch(t *testing.T) {
 	client := NewComparatorClient(internal, external, fatalChan)
 	seq := NewComparatorSequencer(client, internal, external, fatalChan)
 
-	result, _ := seq.StartSequencing(context.Background())
+	result, _ := seq.StartSequencing(context.Background(), execution.SequencingContext{})
 	if result == nil {
 		t.Fatal("expected non-nil result (internal)")
 	}
@@ -160,7 +160,7 @@ func TestComparatorSequencer_StartSequencing_BothNil(t *testing.T) {
 	client := NewComparatorClient(internal, external, fatalChan)
 	seq := NewComparatorSequencer(client, internal, external, fatalChan)
 
-	result, dur := seq.StartSequencing(context.Background())
+	result, dur := seq.StartSequencing(context.Background(), execution.SequencingContext{})
 	if result != nil {
 		t.Fatalf("expected nil result, got %v", result)
 	}

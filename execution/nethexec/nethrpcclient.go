@@ -99,6 +99,11 @@ type rpcStartSequencingResult struct {
 	WaitDurationMs hexutil.Uint64   `json:"waitDurationMs"`
 }
 
+type startSequencingParams struct {
+	L1BlockNumber hexutil.Uint64 `json:"l1BlockNumber"`
+	Timestamp     hexutil.Uint64 `json:"timestamp"`
+}
+
 // InitMessageDigester is an interface for processing init messages
 type InitMessageDigester interface {
 	DigestInitMessage(ctx context.Context, initialL1BaseFee *big.Int, serializedChainConfig []byte) *execution.MessageResult
@@ -339,10 +344,14 @@ func (c *NethRpcClient) FullSyncProgressMap(ctx context.Context) (map[string]int
 	return result, nil
 }
 
-func (c *NethRpcClient) StartSequencing(ctx context.Context) (*execution.SequencedMsg, time.Duration, error) {
+func (c *NethRpcClient) StartSequencing(ctx context.Context, seqCtx execution.SequencingContext) (*execution.SequencedMsg, time.Duration, error) {
 	log.Debug("Making JSON-RPC call to nitroexecution_startSequencing", "url", c.url)
+	params := startSequencingParams{
+		L1BlockNumber: hexutil.Uint64(seqCtx.L1BlockNumber),
+		Timestamp:     hexutil.Uint64(seqCtx.Timestamp),
+	}
 	var result rpcStartSequencingResult
-	if err := c.client.CallContext(ctx, &result, "nitroexecution_startSequencing"); err != nil {
+	if err := c.client.CallContext(ctx, &result, "nitroexecution_startSequencing", params.L1BlockNumber, params.Timestamp); err != nil {
 		log.Error("Failed to call nitroexecution_startSequencing", "error", err)
 		return nil, 0, fmt.Errorf("failed to call nitroexecution_startSequencing: %w", err)
 	}

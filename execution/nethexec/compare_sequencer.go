@@ -5,9 +5,10 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/log"
-
 	"github.com/offchainlabs/nitro/arbos/arbostypes"
+	"github.com/offchainlabs/nitro/arbutil"
 	"github.com/offchainlabs/nitro/execution"
+	"github.com/offchainlabs/nitro/util/containers"
 )
 
 var _ execution.ExecutionSequencer = (*ComparatorSequencer)(nil)
@@ -34,11 +35,22 @@ func NewComparatorSequencer(
 	}
 }
 
+// DigestMessage uses non-fatal comparison in sequencer mode. Geth's DigestMessage
+// uses TryLock on createBlocksMutex and returns "createBlock mutex held" when the
+// sequencer is active. This is a transient condition — the caller retries in 100ms.
+// Primary validation happens via StartSequencing comparison.
+func (s *ComparatorSequencer) DigestMessage(idx arbutil.MessageIndex, msg *arbostypes.MessageWithMetadata, prefetch *arbostypes.MessageWithMetadata) containers.PromiseInterface[*execution.MessageResult] {
+	return comparePromises(nil, "DigestMessage",
+		s.ComparatorClient.internal.DigestMessage(idx, msg, prefetch),
+		s.ComparatorClient.external.DigestMessage(idx, msg, prefetch),
+	)
+}
+
 // --- Compared operations ---
 
-func (s *ComparatorSequencer) StartSequencing(ctx context.Context) (*execution.SequencedMsg, time.Duration) {
-	intMsg, _ := s.internalSeq.StartSequencing(ctx)
-	extMsg, extDur := s.externalSeq.StartSequencing(ctx)
+func (s *ComparatorSequencer) StartSequencing(ctx context.Context, seqCtx execution.SequencingContext) (*execution.SequencedMsg, time.Duration) {
+	intMsg, _ := s.internalSeq.StartSequencing(ctx, seqCtx)
+	extMsg, extDur := s.externalSeq.StartSequencing(ctx, seqCtx)
 
 	if intMsg == nil && extMsg == nil {
 		return nil, extDur

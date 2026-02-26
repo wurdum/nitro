@@ -87,13 +87,18 @@ type ExecutionRecorder interface {
 	PrepareForRecord(ctx context.Context, start, end arbutil.MessageIndex) error
 }
 
+type SequencingContext struct {
+	L1BlockNumber uint64
+	Timestamp     uint64
+}
+
 // needed for sequencer
 type ExecutionSequencer interface {
 	ExecutionClient
 	Pause()
 	Activate()
 	ForwardTo(url string) error
-	StartSequencing(ctx context.Context) (*SequencedMsg, time.Duration)
+	StartSequencing(ctx context.Context, seqCtx SequencingContext) (*SequencedMsg, time.Duration)
 	EndSequencing(ctx context.Context, errWhileSequencing error)
 	EnqueueDelayedMessages(msgs []*arbostypes.L1IncomingMessage, firstMsgIdx uint64)
 	AppendLastSequencedBlock() error

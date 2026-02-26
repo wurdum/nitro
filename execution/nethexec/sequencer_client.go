@@ -39,8 +39,8 @@ func (s *NethermindSequencerClient) ForwardTo(url string) error {
 	return s.rpcClient.ForwardTo(context.Background(), url)
 }
 
-func (s *NethermindSequencerClient) StartSequencing(ctx context.Context) (*execution.SequencedMsg, time.Duration) {
-	msg, dur, err := s.rpcClient.StartSequencing(ctx)
+func (s *NethermindSequencerClient) StartSequencing(ctx context.Context, seqCtx execution.SequencingContext) (*execution.SequencedMsg, time.Duration) {
+	msg, dur, err := s.rpcClient.StartSequencing(ctx, seqCtx)
 	if err != nil {
 		log.Error("Failed to call StartSequencing on Nethermind", "error", err)
 		return nil, 0
@@ -102,8 +102,8 @@ func (w *InternalSequencerWrapper) ForwardTo(url string) error {
 	return w.sequencer.ForwardTo(url)
 }
 
-func (w *InternalSequencerWrapper) StartSequencing(ctx context.Context) (*execution.SequencedMsg, time.Duration) {
-	return w.sequencer.StartSequencing(ctx)
+func (w *InternalSequencerWrapper) StartSequencing(ctx context.Context, seqCtx execution.SequencingContext) (*execution.SequencedMsg, time.Duration) {
+	return w.sequencer.StartSequencing(ctx, seqCtx)
 }
 
 func (w *InternalSequencerWrapper) EndSequencing(ctx context.Context, errWhileSequencing error) {

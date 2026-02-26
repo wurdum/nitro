@@ -503,11 +503,11 @@ func (n *ExecutionNode) Reorg(newHeadMsgIdx arbutil.MessageIndex, newMessages []
 func (n *ExecutionNode) ResequenceReorgedMessage(msg *arbostypes.MessageWithMetadata) (*execution.SequencedMsg, error) {
 	return n.ExecEngine.ResequenceReorgedMessage(msg)
 }
-func (n *ExecutionNode) StartSequencing(ctx context.Context) (*execution.SequencedMsg, time.Duration) {
+func (n *ExecutionNode) StartSequencing(ctx context.Context, seqCtx execution.SequencingContext) (*execution.SequencedMsg, time.Duration) {
 	if n.Sequencer == nil {
 		return nil, time.Hour
 	}
-	return n.Sequencer.StartSequencing(ctx)
+	return n.Sequencer.StartSequencing(ctx, seqCtx)
 }
 func (n *ExecutionNode) EndSequencing(ctx context.Context, errWhileSequencing error) {
 	if n.Sequencer == nil {
