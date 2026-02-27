@@ -889,6 +889,7 @@ func openInitializeChainDb(ctx context.Context, stack *node.Node, config *NodeCo
 			}
 			log.Info("Read serialized chain config from init message", "json", string(parsedInitMessage.SerializedChainConfig))
 			log.Info("SerializedChainConfig", base64.StdEncoding.EncodeToString(parsedInitMessage.SerializedChainConfig))
+			log.Info("InitialL1BaseFee", parsedInitMessage.InitialL1BaseFee.String())
 		} else {
 			serializedChainConfig, err := json.Marshal(chainConfig)
 			if err != nil {
