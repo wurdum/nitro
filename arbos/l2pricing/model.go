@@ -32,7 +32,14 @@ func (ps *L2PricingState) ShouldUseGasConstraints() (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		return constraintsLength > 0, nil
+
+		result := constraintsLength > 0
+
+		if types.IsTargetBlock() {
+			types.OLog2(fmt.Sprintf("l2Pricing constraint shouldUseGasConstraints=%t arbosVersion=%d", result, ps.ArbosVersion))
+		}
+
+		return result, nil
 	}
 	return false, nil
 }
@@ -57,7 +64,7 @@ func (ps *L2PricingState) addToGasPoolLegacy(gas int64) error {
 	backlog = applyGasDelta(backlog, gas)
 
 	if types.IsTargetBlock() {
-		types.OLog2(fmt.Sprintf("l2 pricing legacy gas=%d backlog=%d newBacklog=%d", gas, oldBacklog, backlog))
+		types.OLog2(fmt.Sprintf("l2Pricing gas=%d backlog=%d newBacklog=%d arbosVersion=%d", gas, oldBacklog, backlog, ps.ArbosVersion))
 	}
 
 	return ps.SetGasBacklog(backlog)
@@ -78,7 +85,7 @@ func (ps *L2PricingState) addToGasPoolMultiConstraints(gas int64) error {
 		err = constraint.backlog.Set(newBacklog)
 
 		if types.IsTargetBlock() {
-			types.OLog2(fmt.Sprintf("l2 pricing new gas=%d backlog=%d newBacklog=%d", gas, backlog, newBacklog))
+			types.OLog2(fmt.Sprintf("l2Pricing gas=%d backlog=%d newBacklog=%d constraint=%d arbosVersion=%d", gas, backlog, newBacklog, i, ps.ArbosVersion))
 		}
 
 		if err != nil {
@@ -105,6 +112,10 @@ func (ps *L2PricingState) GasPoolUpdateCost() uint64 {
 			// updating (read+write) all constraints, first one was already accounted for
 			result += uint64(constraintsLength-1) * (storage.StorageReadCost + storage.StorageWriteCost)
 		}
+	}
+
+	if types.IsTargetBlock() {
+		types.OLog2(fmt.Sprintf("l2Pricing cost=%d arbosVersion=%d", result, ps.ArbosVersion))
 	}
 
 	return result
