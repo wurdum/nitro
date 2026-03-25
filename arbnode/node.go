@@ -32,6 +32,8 @@ import (
 	"github.com/offchainlabs/nitro/broadcastclients"
 	"github.com/offchainlabs/nitro/broadcaster"
 	"github.com/offchainlabs/nitro/cmd/chaininfo"
+	"github.com/offchainlabs/nitro/consensus"
+	"github.com/offchainlabs/nitro/consensus/consensusrpcserver"
 	"github.com/offchainlabs/nitro/daprovider"
 	"github.com/offchainlabs/nitro/daprovider/anytrust"
 	daconfig "github.com/offchainlabs/nitro/daprovider/config"
@@ -1332,6 +1334,12 @@ func registerAPIs(currentNode *Node, stack *node.Node) {
 			Public: false,
 		})
 	}
+	apis = append(apis, rpc.API{
+		Namespace: consensus.RPCNamespace,
+		Version:   "1.0",
+		Service:   consensusrpcserver.NewConsensusRPCServer(currentNode),
+		Public:    false,
+	})
 	stack.RegisterAPIs(apis)
 }
 
